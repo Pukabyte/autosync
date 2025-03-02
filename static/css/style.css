@@ -1,0 +1,77 @@
+/* Custom styles for Autosync */
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+/* Card hover effect */
+.card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Custom colors for different instance types */
+.bg-sonarr {
+    background-color: #2980b9;
+    color: white;
+}
+
+.bg-radarr {
+    background-color: #27ae60;
+    color: white;
+}
+
+.bg-plex {
+    background-color: #e67e22;
+    color: white;
+}
+
+.bg-jellyfin {
+    background-color: #8e44ad;
+    color: white;
+}
+
+.bg-emby {
+    background-color: #16a085;
+    color: white;
+}
+
+/* Form styling */
+.form-text {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+/* List group item hover */
+.list-group-item {
+    transition: background-color 0.2s;
+}
+
+.list-group-item:hover {
+    background-color: #f8f9fa;
+}
+
+/* Button hover effects */
+.btn {
+    transition: transform 0.1s;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Webhook URL display */
+#webhookUrl {
+    font-family: monospace;
+    background-color: #f8f9fa;
+} 

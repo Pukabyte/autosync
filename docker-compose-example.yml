@@ -1,0 +1,16 @@
+services:
+  autosync:
+    image: ghcr.io/pukabyte/autosync:latest
+    container_name: autosync
+    hostname: autosync
+    ports:
+      - 3536:3536
+    environment:
+      - TZ=Pacific/Auckland
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped

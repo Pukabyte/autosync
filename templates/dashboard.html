@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Autosync Dashboard{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.type }} alert-dismissible fade show" role="alert">
+        {{ message.text }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4 mb-md-0">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Sonarr Instances</h5>
+                    <a href="/instances/add?type=sonarr" class="btn btn-sm btn-primary">Add Sonarr</a>
+                </div>
+                <div class="card-body">
+                    {% if sonarr_instances %}
+                        <div class="list-group">
+                            {% for instance in sonarr_instances %}
+                            <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">{{ instance.name }}</h6>
+                                    <small>{{ instance.url }}</small>
+                                </div>
+                                <div class="btn-group">
+                                    <a href="/instances/edit/{{ instance.name }}/sonarr" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    <a href="/instances/delete/{{ instance.name }}/sonarr" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this instance?')">Delete</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No Sonarr instances configured</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Radarr Instances</h5>
+                    <a href="/instances/add?type=radarr" class="btn btn-sm btn-primary">Add Radarr</a>
+                </div>
+                <div class="card-body">
+                    {% if radarr_instances %}
+                        <div class="list-group">
+                            {% for instance in radarr_instances %}
+                            <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">{{ instance.name }}</h6>
+                                    <small>{{ instance.url }}</small>
+                                </div>
+                                <div class="btn-group">
+                                    <a href="/instances/edit/{{ instance.name }}/radarr" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    <a href="/instances/delete/{{ instance.name }}/radarr" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this instance?')">Delete</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No Radarr instances configured</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Media Servers</h5>
+                    <a href="/media-servers/add" class="btn btn-sm btn-primary">Add Media Server</a>
+                </div>
+                <div class="card-body">
+                    {% if media_servers %}
+                        <div class="list-group">
+                            {% for server in media_servers %}
+                            <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">{{ server.name }} ({{ server.type }})</h6>
+                                    <small>{{ server.url }}</small>
+                                    {% if not server.enabled %}
+                                    <span class="badge bg-warning text-dark">Disabled</span>
+                                    {% endif %}
+                                </div>
+                                <div class="btn-group">
+                                    <a href="/media-servers/edit/{{ server.name }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    <a href="/media-servers/delete/{{ server.name }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this media server?')">Delete</a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No media servers configured</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Application Settings</h5>
+                    <a href="/settings" class="btn btn-sm btn-primary">Edit Settings</a>
+                </div>
+                <div class="card-body">
+                    <div class="list-group">
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Sync Delay</h6>
+                                <span class="badge bg-secondary">{{ config.sync_delay }}</span>
+                            </div>
+                            <small class="text-muted">Delay before processing webhooks</small>
+                        </div>
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Sync Interval</h6>
+                                <span class="badge bg-secondary">{{ config.sync_interval }}</span>
+                            </div>
+                            <small class="text-muted">Time between sync operations</small>
+                        </div>
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Log Level</h6>
+                                <span class="badge bg-secondary">{{ config.log_level }}</span>
+                            </div>
+                            <small class="text-muted">Application logging verbosity</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Webhook URL</h5>
+                </div>
+                <div class="card-body">
+                    <p>Configure your Sonarr and Radarr instances to use the following webhook URL:</p>
+                    <div class="input-group">
+                        <input type="text" class="form-control" value="http://{{ request.headers.get('host') }}/webhook" id="webhookUrl" readonly>
+                        <button class="btn btn-outline-secondary" type="button" onclick="copyWebhookUrl()">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyWebhookUrl() {
+    var copyText = document.getElementById("webhookUrl");
+    copyText.select();
+    document.execCommand("copy");
+    alert("Webhook URL copied to clipboard");
+}
+</script>
+{% endblock %} 

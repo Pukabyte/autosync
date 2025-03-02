@@ -1,0 +1,14 @@
+# Config files
+config.yaml
+docker-compose.yml
+
+# Example/template files should still be included
+!config-example.yaml
+!docker-compose-example.yml
+
+# Git and development files
+.git
+.gitignore
+__pycache__
+*.pyc
+.env 

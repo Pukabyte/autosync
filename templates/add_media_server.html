@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Add Media Server{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Add Media Server</h1>
+        <p class="lead">Configure a new media server for scanning</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="post" action="/media-servers/add">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Server Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                        <div class="form-text">A unique name to identify this media server</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="type" class="form-label">Server Type</label>
+                        <select class="form-select" id="type" name="type" required onchange="updateServerFields()">
+                            <option value="plex">Plex</option>
+                            <option value="jellyfin">Jellyfin</option>
+                            <option value="emby">Emby</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="url" name="url" required placeholder="http://plex:32400">
+                        <div class="form-text">The full URL to your media server</div>
+                    </div>
+                    
+                    <div class="mb-3" id="token_field">
+                        <label for="token" class="form-label">Plex Token</label>
+                        <input type="text" class="form-control" id="token" name="token">
+                        <div class="form-text">Your Plex authentication token</div>
+                    </div>
+                    
+                    <div class="mb-3" id="api_key_field" style="display: none;">
+                        <label for="api_key" class="form-label">API Key</label>
+                        <input type="text" class="form-control" id="api_key" name="api_key">
+                        <div class="form-text">The API key for your media server</div>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="enabled" name="enabled" value="true" checked>
+                        <label class="form-check-label" for="enabled">Enabled</label>
+                        <div class="form-text">Whether this media server should be active</div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="/" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Add Media Server</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="card-title mb-0">Help</h5>
+            </div>
+            <div class="card-body">
+                <h6>Finding Your Plex Token</h6>
+                <ol class="small">
+                    <li>Sign in to Plex web app</li>
+                    <li>Open Developer Tools (F12)</li>
+                    <li>Go to the Network tab</li>
+                    <li>Refresh the page</li>
+                    <li>Look for a request with "X-Plex-Token=" in the URL</li>
+                    <li>The token is the value after "X-Plex-Token="</li>
+                </ol>
+                
+                <h6 class="mt-3">Jellyfin/Emby API Key</h6>
+                <p class="small">
+                    For Jellyfin/Emby, you can find or generate an API key in the 
+                    server dashboard under API Keys or similar settings.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateServerFields() {
+    const serverType = document.getElementById('type').value;
+    const tokenField = document.getElementById('token_field');
+    const apiKeyField = document.getElementById('api_key_field');
+    const urlField = document.getElementById('url');
+    
+    // Update URL placeholder based on server type
+    if (serverType === 'plex') {
+        urlField.placeholder = 'http://plex:32400';
+        tokenField.style.display = 'block';
+        apiKeyField.style.display = 'none';
+        document.getElementById('token').setAttribute('required', 'required');
+        document.getElementById('api_key').removeAttribute('required');
+    } else if (serverType === 'jellyfin') {
+        urlField.placeholder = 'http://jellyfin:8096';
+        tokenField.style.display = 'none';
+        apiKeyField.style.display = 'block';
+        document.getElementById('api_key').setAttribute('required', 'required');
+        document.getElementById('token').removeAttribute('required');
+    } else if (serverType === 'emby') {
+        urlField.placeholder = 'http://emby:8096';
+        tokenField.style.display = 'none';
+        apiKeyField.style.display = 'block';
+        document.getElementById('api_key').setAttribute('required', 'required');
+        document.getElementById('token').removeAttribute('required');
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateServerFields();
+});
+</script>
+{% endblock %} 

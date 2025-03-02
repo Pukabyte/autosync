@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ instance.type|title }} Instance{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Edit {{ instance.type|title }} Instance</h1>
+        <p class="lead">Update configuration for {{ instance.name }}</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="post" action="/instances/edit/{{ instance.name }}/{{ instance.type }}">
+                    <input type="hidden" name="type" value="{{ instance.type }}" id="instance_type">
+                    <input type="hidden" name="name" value="{{ instance.name }}">
+                    
+                    <div class="mb-3">
+                        <label for="url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="url" name="url" required value="{{ instance.url }}">
+                        <div class="form-text">The full URL to your {{ instance.type|title }} instance</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="api_key" class="form-label">API Key</label>
+                        <input type="text" class="form-control" id="api_key" name="api_key" required value="{{ instance.api_key }}">
+                        <div class="form-text">Found in {{ instance.type|title }} under Settings > General</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="root_folder_path" class="form-label">Root Folder Path</label>
+                        <input type="text" class="form-control" id="root_folder_path" name="root_folder_path" required value="{{ instance.root_folder_path }}">
+                        <div class="form-text">Path where media will be stored</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="quality_profile_id" class="form-label">Quality Profile ID</label>
+                        <input type="number" class="form-control" id="quality_profile_id" name="quality_profile_id" required value="{{ instance.quality_profile_id }}">
+                        <div class="form-text">The quality profile ID to use (see README for how to find this)</div>
+                    </div>
+                    
+                    {% if instance.type == 'sonarr' %}
+                    <div class="mb-3">
+                        <label for="language_profile_id" class="form-label">Language Profile ID</label>
+                        <input type="number" class="form-control" id="language_profile_id" name="language_profile_id" value="{{ instance.language_profile_id }}">
+                        <div class="form-text">The language profile ID to use (Sonarr only)</div>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="season_folder" name="season_folder" value="true" {% if instance.season_folder %}checked{% endif %}>
+                        <label class="form-check-label" for="season_folder">Use Season Folders</label>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync" value="true" {% if instance.search_on_sync %}checked{% endif %}>
+                        <label class="form-check-label" for="search_on_sync">Search on Sync</label>
+                        <div class="form-text">Automatically search for media when added</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Enabled Events</label>
+                        <div class="form-text mb-2">Select which events to handle for this instance</div>
+                        
+                        {% if instance.type == 'sonarr' %}
+                            {% for event in ["Grab", "Download", "Rename", "SeriesDelete", "EpisodeFileDelete", "Import"] %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
+                                       {% if event in instance.enabled_events %}checked{% endif %}>
+                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            {% for event in ["Grab", "Download", "Rename", "MovieDelete", "MovieFileDelete", "Import"] %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
+                                       {% if event in instance.enabled_events %}checked{% endif %}>
+                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="/" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Update Instance</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="card-title mb-0">Help</h5>
+            </div>
+            <div class="card-body">
+                <h6>Finding Quality Profile IDs</h6>
+                <ol class="small">
+                    <li>Open your browser's Developer Tools (F12)</li>
+                    <li>Go to the Network tab</li>
+                    <li>Navigate to Settings -> Profiles in {{ instance.type|title }}</li>
+                    <li>Click on the quality profile you want to use</li>
+                    <li>Look for a network request in Dev Tools</li>
+                    <li>Find the ID number in the response data</li>
+                </ol>
+                
+                <h6 class="mt-3">API Key Location</h6>
+                <p class="small">
+                    In {{ instance.type|title }}, go to Settings -> General -> Security
+                    to find your API key.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Set the appropriate URL placeholder based on instance type
+document.addEventListener('DOMContentLoaded', function() {
+    const instanceType = document.getElementById('instance_type').value;
+    const urlField = document.getElementById('url');
+    
+    if (instanceType === 'sonarr') {
+        urlField.placeholder = 'http://sonarr:8989';
+    } else if (instanceType === 'radarr') {
+        urlField.placeholder = 'http://radarr:7878';
+    }
+});
+</script>
+{% endblock %} 

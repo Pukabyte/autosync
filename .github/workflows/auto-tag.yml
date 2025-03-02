@@ -1,0 +1,123 @@
+name: Auto Tag
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This permission is needed to create and push tags
+      packages: write  # This permission is needed for Docker push
+      id-token: write  # This is used for signing Docker images
+    if: contains(github.event.head_commit.message, '#release')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use the GitHub token with write permissions
+
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # Get the latest tag or set to v0.0.0 if none exists
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "Latest tag: $LATEST_TAG"
+          
+          # Extract version components
+          MAJOR=$(echo $LATEST_TAG | sed 's/v\([0-9]*\)\..*/\1/')
+          MINOR=$(echo $LATEST_TAG | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
+          PATCH=$(echo $LATEST_TAG | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
+          echo "MAJOR=$MAJOR" >> $GITHUB_ENV
+          echo "MINOR=$MINOR" >> $GITHUB_ENV
+          echo "PATCH=$PATCH" >> $GITHUB_ENV
+
+      - name: Determine version bump
+        id: determine_version
+        run: |
+          # Check commit message for version bump indicators
+          if [[ "${{ github.event.head_commit.message }}" == *"#major"* ]]; then
+            NEW_MAJOR=$((MAJOR + 1))
+            NEW_MINOR=0
+            NEW_PATCH=0
+            echo "Bumping major version"
+          elif [[ "${{ github.event.head_commit.message }}" == *"#minor"* ]]; then
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$((MINOR + 1))
+            NEW_PATCH=0
+            echo "Bumping minor version"
+          else
+            # Default to patch bump
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$MINOR
+            NEW_PATCH=$((PATCH + 1))
+            echo "Bumping patch version"
+          fi
+          
+          NEW_TAG="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+          echo "New tag will be: $NEW_TAG"
+
+      - name: Create and push tag
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git tag -a ${{ env.NEW_TAG }} -m "Release ${{ env.NEW_TAG }}"
+          git push https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git ${{ env.NEW_TAG }}
+          echo "Created and pushed tag: ${{ env.NEW_TAG }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      # Install the cosign tool
+      - name: Install cosign
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      # Login to GitHub Container Registry
+      - name: Log into registry
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ env.NEW_TAG }}
+            type=semver,pattern={{version}},value=${{ env.NEW_TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.NEW_TAG }}
+            type=semver,pattern={{major}},value=${{ env.NEW_TAG }}
+            type=raw,value=latest
+
+      # Build and push Docker image
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Sign the Docker image
+      - name: Sign the published Docker image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST} 

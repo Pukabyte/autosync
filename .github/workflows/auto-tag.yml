@@ -115,7 +115,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.PACKAGES_TOKEN }}  # Use a PAT with packages:write scope
 
       # Build and push Docker image using Docker CLI directly
       - name: Build and push Docker image

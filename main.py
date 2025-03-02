@@ -783,7 +783,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Initialize scanner with media servers from config
                     media_servers = config.get("media_servers", [])
-                    logger.info(f"Found {len(media_servers)} media server(s) to scan")
+                    logger.debug(f"Found {len(media_servers)} media server(s) to scan")
                     
                     # Apply sync interval before media server scanning
                     if sync_interval > 0:
@@ -796,10 +796,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     scan_path = None
                     if series_path:  # Use series path for better Plex library scanning
                         scan_path = series_path
-                        logger.info(f"Using series path for scanning: {scan_path}")
+                        logger.debug(f"Using series path for scanning: {scan_path}")
                     elif file_path:  # Fallback to file path if series path not available
                         scan_path = file_path
-                        logger.info(f"Using episode file path for scanning: {scan_path}")
+                        logger.debug(f"Using episode file path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:
@@ -888,7 +888,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Initialize scanner with media servers from config
                     media_servers = config.get("media_servers", [])
-                    logger.info(f"Found {len(media_servers)} media server(s) to scan")
+                    logger.debug(f"Found {len(media_servers)} media server(s) to scan")
                     
                     # Apply sync interval before media server scanning
                     if sync_interval > 0:
@@ -901,10 +901,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     scan_path = None
                     if folder_path:  # Use folder path for better Plex library scanning
                         scan_path = folder_path
-                        logger.info(f"Using movie folder path for scanning: {scan_path}")
+                        logger.debug(f"Using movie folder path for scanning: {scan_path}")
                     elif file_path:  # Fallback to file path if folder path not available
                         scan_path = file_path
-                        logger.info(f"Using movie file path for scanning: {scan_path}")
+                        logger.debug(f"Using movie file path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:

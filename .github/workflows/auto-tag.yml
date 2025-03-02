@@ -87,7 +87,7 @@ jobs:
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Extract metadata for Docker
@@ -102,6 +102,19 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ env.NEW_TAG }}
             type=semver,pattern={{major}},value=${{ env.NEW_TAG }}
             type=raw,value=latest
+
+      # Configure package visibility
+      - name: Configure package visibility
+        run: |
+          echo "::group::Configure package visibility"
+          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "Setting package visibility for $REPO_NAME"
+          curl -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/user/packages/container/$REPO_NAME/visibility \
+            -d '{"visibility":"public"}'
+          echo "::endgroup::"
 
       # Build and push Docker image
       - name: Build and push Docker image

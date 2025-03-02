@@ -155,6 +155,8 @@ jobs:
           # Output the image digest for signing
           echo "Getting image digest for signing..."
           DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_NAME:${{ env.NEW_TAG }} | cut -d'@' -f2)
+          # Remove any sha256: prefix from the digest to avoid duplication
+          DIGEST=$(echo $DIGEST | sed 's/^sha256://g')
           echo "Image digest: $DIGEST"
           echo "DIGEST=$DIGEST" >> $GITHUB_ENV
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
@@ -168,7 +170,7 @@ jobs:
       # Sign the Docker image
       - name: Sign the published Docker image
         run: |
-          cosign sign --yes ${IMAGE_NAME}@sha256:${DIGEST} 
+          cosign sign --yes ${IMAGE_NAME}@sha256:${DIGEST}
         env:
           COSIGN_EXPERIMENTAL: "true"
           GITHUB_TOKEN: ${{ secrets.CR_PAT }} 

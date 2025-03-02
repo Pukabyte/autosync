@@ -72,6 +72,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
+      # Create GitHub Release
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.NEW_TAG }}
+          name: Release ${{ env.NEW_TAG }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
       # Install the cosign tool
       - name: Install cosign
         uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
@@ -87,7 +100,7 @@ jobs:
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Extract metadata for Docker
@@ -102,19 +115,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ env.NEW_TAG }}
             type=semver,pattern={{major}},value=${{ env.NEW_TAG }}
             type=raw,value=latest
-
-      # Configure package visibility
-      - name: Configure package visibility
-        run: |
-          echo "::group::Configure package visibility"
-          REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "Setting package visibility for $REPO_NAME"
-          curl -X PUT \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/user/packages/container/$REPO_NAME/visibility \
-            -d '{"visibility":"public"}'
-          echo "::endgroup::"
 
       # Build and push Docker image
       - name: Build and push Docker image

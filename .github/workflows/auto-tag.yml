@@ -114,8 +114,8 @@ jobs:
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.PACKAGES_TOKEN }}  # Use a PAT with packages:write scope
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       # Build and push Docker image using Docker CLI directly
       - name: Build and push Docker image

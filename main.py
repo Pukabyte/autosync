@@ -56,22 +56,26 @@ async def lifespan(app: FastAPI):
         
         # Setup logging based on config
         log_level = getattr(logging, config.get('log_level', 'INFO').upper())
-        # Configure root logger with custom format
+        
+        # Configure root logger with improved format
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s %(levelname)s %(message)s',
-            datefmt='%b %d %H:%M:%S'
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # Convert level names to match desired format
-        logging.addLevelName(logging.INFO, 'INF')
-        logging.addLevelName(logging.ERROR, 'ERR')
-        logging.addLevelName(logging.WARNING, 'WRN')
-        logging.addLevelName(logging.DEBUG, 'DBG')
+        # Use more descriptive level names instead of abbreviations
+        logging.addLevelName(logging.INFO, '\033[32mINFO\033[0m')     # Green
+        logging.addLevelName(logging.ERROR, '\033[31mERROR\033[0m')   # Red
+        logging.addLevelName(logging.WARNING, '\033[33mWARN\033[0m')  # Yellow
+        logging.addLevelName(logging.DEBUG, '\033[36mDEBUG\033[0m')   # Cyan
         
         # Build startup messages
-        logger.info("Starting server on :3536")
-        logger.info(f"log level: {config.get('log_level', 'INFO').lower()}")
+        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        logger.info("\033[1mAutoSyncarr\033[0m starting up")
+        logger.info(f"  ├─ Version: \033[1m{VERSION}\033[0m")
+        logger.info(f"  ├─ Server port: 3536")
+        logger.info(f"  └─ Log level: \033[1m{config.get('log_level', 'INFO').lower()}\033[0m")
         
         # Convert dict instances to proper types and assign to global variables
         sonarr_instances = [
@@ -97,20 +101,25 @@ async def lifespan(app: FastAPI):
                 server_types[server_type] += 1
         
         # Build initialization message for instances
-        instances_msg = "Initialised instances:"
-        instances_msg += f" sonarr={len(sonarr_instances)}"
-        instances_msg += f" radarr={len(radarr_instances)}"
-        logger.info(instances_msg)
+        logger.info("Instances configuration:")
+        logger.info(f"  ├─ Sonarr: \033[1m{len(sonarr_instances)}\033[0m instance(s)")
+        logger.info(f"  └─ Radarr: \033[1m{len(radarr_instances)}\033[0m instance(s)")
         
         # Build initialization message for media servers
-        targets_msg = "Initialised targets:"
-        targets_msg += f" plex={server_types.get('Plex', 0)}"
-        targets_msg += f" emby={server_types.get('Emby', 0)}"
-        targets_msg += f" jellyfin={server_types.get('Jellyfin', 0)}"
-        logger.info(targets_msg)
-
+        logger.info("Media servers configuration:")
+        media_server_types = []
+        for server_type, count in server_types.items():
+            media_server_types.append(f"{server_type}: \033[1m{count}\033[0m")
+        
+        if media_server_types:
+            for i, server_info in enumerate(media_server_types):
+                prefix = "  └─ " if i == len(media_server_types) - 1 else "  ├─ "
+                logger.info(f"{prefix}{server_info}")
+        else:
+            logger.info("  └─ No media servers configured")
+        
         # Log version information
-        logger.info(f"Initialised version=\"{VERSION}\"")
+        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     except Exception as e:
         logger.error(f"Failed to initialize server error=\"{str(e)}\"")
         raise
@@ -743,7 +752,9 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 
             # Log webhook receipt
             path = payload.get("series", {}).get("path", "")
-            logger.info(f"Scan moved to processor event={event_type} id={webhook_id} method=POST path=\"{path}\" instance=sonarr")
+            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            logger.info(f"Processing Sonarr webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+            logger.info(f"  └─ Series path: \033[1m{path}\033[0m")
 
             webhook_data = SonarrWebhook(**payload)
             
@@ -757,6 +768,60 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             
             if not valid_instances:
                 logger.info(f"No Sonarr instances configured for event={event_type}")
+                
+                # Even if no instances are configured, we should still scan media servers for Import events
+                if event_type == "Import":
+                    # Get config for sync timing
+                    config = get_config()
+                    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+                    
+                    # Get paths from payload for scanning
+                    series_data = payload.get("series", {})
+                    episode_file = payload.get("episodeFile", {})
+                    series_path = series_data.get("path", "")
+                    file_path = episode_file.get("path", "")
+                    
+                    # Initialize scanner with media servers from config
+                    media_servers = config.get("media_servers", [])
+                    logger.info(f"Found {len(media_servers)} media server(s) to scan")
+                    
+                    # Apply sync interval before media server scanning
+                    if sync_interval > 0:
+                        logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+                        await asyncio.sleep(sync_interval)
+                    
+                    scanner = MediaServerScanner(media_servers)
+                    
+                    # Try to scan using the most specific path available
+                    scan_path = None
+                    if series_path:  # Use series path for better Plex library scanning
+                        scan_path = series_path
+                        logger.info(f"Using series path for scanning: {scan_path}")
+                    elif file_path:  # Fallback to file path if series path not available
+                        scan_path = file_path
+                        logger.info(f"Using episode file path for scanning: {scan_path}")
+                    
+                    scan_results = []
+                    if scan_path:
+                        logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
+                        scan_results = await scanner.scan_path(scan_path, is_series=True)
+                        
+                        # Format scan results for better readability
+                        logger.info(f"Scan results summary:")
+                        for idx, result in enumerate(scan_results):
+                            status = result.get("status", "unknown")
+                            status_color = "\033[32m" if status == "success" else "\033[31m"  # Green for success, red for errors
+                            logger.info(f"  {'└─' if idx == len(scan_results)-1 else '├─'} {result.get('server', 'Unknown')} ({result.get('type', 'unknown')}): {status_color}{status}\033[0m")
+                            if status == "error" and "error" in result:
+                                logger.info(f"     └─ Error: {result['error']}")
+                        
+                        return {
+                            "status": "ok",
+                            "message": "No Sonarr instances configured, but media servers were scanned",
+                            "scanResults": scan_results,
+                            "scannedPath": scan_path
+                        }
+                
                 return {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             
             if event_type == "Grab":
@@ -790,9 +855,11 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             folder_path = movie_data.get("folderPath", "")
             file_path = movie_file.get("path", "")
             
-            logger.info(f"Processing Radarr webhook: event={event_type} id={webhook_id}")
-            logger.info(f"Movie folder path: {folder_path}")
-            logger.info(f"Movie file path: {file_path}")
+            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            logger.info(f"Processing Radarr webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+            logger.info(f"  ├─ Movie: \033[1m{movie_data.get('title', 'Unknown')}\033[0m")
+            logger.info(f"  ├─ Folder path: {folder_path}")
+            logger.info(f"  └─ File path: {file_path}")
 
             webhook_data = RadarrWebhook(**payload)
             
@@ -806,6 +873,60 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             
             if not valid_instances:
                 logger.info(f"No Radarr instances configured for event={event_type}")
+                
+                # Even if no instances are configured, we should still scan media servers for Import events
+                if event_type == "Import":
+                    # Get config for sync timing
+                    config = get_config()
+                    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+                    
+                    # Get paths from payload for scanning
+                    movie_data = payload.get("movie", {})
+                    movie_file = payload.get("movieFile", {})
+                    folder_path = movie_data.get("folderPath", "")
+                    file_path = movie_file.get("path", "")
+                    
+                    # Initialize scanner with media servers from config
+                    media_servers = config.get("media_servers", [])
+                    logger.info(f"Found {len(media_servers)} media server(s) to scan")
+                    
+                    # Apply sync interval before media server scanning
+                    if sync_interval > 0:
+                        logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+                        await asyncio.sleep(sync_interval)
+                    
+                    scanner = MediaServerScanner(media_servers)
+                    
+                    # Try to scan using the most specific path available
+                    scan_path = None
+                    if folder_path:  # Use folder path for better Plex library scanning
+                        scan_path = folder_path
+                        logger.info(f"Using movie folder path for scanning: {scan_path}")
+                    elif file_path:  # Fallback to file path if folder path not available
+                        scan_path = file_path
+                        logger.info(f"Using movie file path for scanning: {scan_path}")
+                    
+                    scan_results = []
+                    if scan_path:
+                        logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
+                        scan_results = await scanner.scan_path(scan_path, is_series=False)
+                        
+                        # Format scan results for better readability
+                        logger.info(f"Scan results summary:")
+                        for idx, result in enumerate(scan_results):
+                            status = result.get("status", "unknown")
+                            status_color = "\033[32m" if status == "success" else "\033[31m"  # Green for success, red for errors
+                            logger.info(f"  {'└─' if idx == len(scan_results)-1 else '├─'} {result.get('server', 'Unknown')} ({result.get('type', 'unknown')}): {status_color}{status}\033[0m")
+                            if status == "error" and "error" in result:
+                                logger.info(f"     └─ Error: {result['error']}")
+                        
+                        return {
+                            "status": "ok",
+                            "message": "No Radarr instances configured, but media servers were scanned",
+                            "scanResults": scan_results,
+                            "scannedPath": scan_path
+                        }
+                
                 return {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             
             if event_type == "Grab":
@@ -946,8 +1067,8 @@ if __name__ == "__main__":
         "formatters": {
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(asctime)s %(levelname)s %(message)s",
-                "datefmt": "%b %d %H:%M:%S",
+                "fmt": "%(asctime)s [%(levelname)s] %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
         "handlers": {

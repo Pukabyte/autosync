@@ -13,9 +13,24 @@ logger = logging.getLogger(__name__)
 class MediaServerScanner:
     def __init__(self, servers: List[Dict[str, Any]]):
         self.servers = []
-        logger.info(f"Initializing MediaServerScanner with {len(servers)} server(s)")
-        for server in servers:
-            logger.info(f"Processing server config: name={server.get('name')}, type={server.get('type')}, enabled={server.get('enabled')}")
+        logger.info(f"Initializing MediaServerScanner with \033[1m{len(servers)}\033[0m server(s)")
+        
+        if not servers:
+            logger.warning("No media servers provided for scanning")
+            return
+            
+        logger.info("Media server details:")
+        for idx, server in enumerate(servers):
+            server_name = server.get('name', 'Unknown')
+            server_type = server.get('type', 'Unknown')
+            server_enabled = server.get('enabled', True)
+            
+            status_color = "\033[32m" if server_enabled else "\033[31m"  # Green for enabled, red for disabled
+            status_text = f"{status_color}{'enabled' if server_enabled else 'disabled'}\033[0m"
+            
+            prefix = "  └─ " if idx == len(servers) - 1 else "  ├─ "
+            logger.info(f"{prefix}\033[1m{server_name}\033[0m ({server_type}): {status_text}")
+            
             if server["type"] == "plex":
                 self.servers.append(PlexServer(**server))
             elif server["type"] == "jellyfin":
@@ -27,7 +42,9 @@ class MediaServerScanner:
         try:
             # Get parent folder for both movies and series
             parent_path = str(Path(path).parent)
-            logger.info(f"Scanning path: {path} (parent: {parent_path}, is_series: {is_series})")
+            logger.info(f"Scanning path: \033[1m{path}\033[0m")
+            logger.info(f"  ├─ Parent path: {parent_path}")
+            logger.info(f"  └─ Content type: {'Series' if is_series else 'Movie'}")
             
             if is_series:
                 scan_path = path
@@ -45,7 +62,7 @@ class MediaServerScanner:
 
             results = []
             active_servers = [s for s in self.servers if s.enabled]
-            logger.info(f"Found {len(active_servers)} enabled media servers out of {len(self.servers)} total")
+            logger.info(f"Media servers: {len(active_servers)} enabled out of {len(self.servers)} total")
             
             if not active_servers:
                 logger.error("All media servers are disabled")
@@ -113,8 +130,10 @@ class MediaServerScanner:
             "Accept": "application/json"
         }
         
-        logger.info(f"Starting Plex scan for server {server.name} at path: {path}")
-        logger.info(f"Server URL: {server.url}, Library Type: {library_type}")
+        logger.info(f"Starting Plex scan for server \033[1m{server.name}\033[0m")
+        logger.info(f"  ├─ URL: {server.url}")
+        logger.info(f"  ├─ Library type: {library_type}")
+        logger.info(f"  └─ Path: {path}")
         
         async with aiohttp.ClientSession() as session:
             try:
@@ -128,35 +147,41 @@ class MediaServerScanner:
                         raise ValueError(f"Failed to get Plex sections: {response.status} - {error_text}")
                     
                     sections = await response.json()
-                    logger.info(f"Retrieved {len(sections.get('MediaContainer', {}).get('Directory', []))} sections from Plex")
+                    section_count = len(sections.get('MediaContainer', {}).get('Directory', []))
+                    logger.info(f"Retrieved \033[1m{section_count}\033[0m library sections from Plex")
 
                 # Find the section containing our path
                 section_id = None
                 matching_sections = []
 
                 # First pass: collect all sections of the correct type
+                logger.info(f"Searching for matching {library_type} libraries:")
                 for section in sections["MediaContainer"]["Directory"]:
                     section_type = section["type"]
                     section_title = section["title"]
-                    logger.info(f"Checking section: {section_title} (type: {section_type})")
                     
                     if (library_type == "Movies" and section_type == "movie") or \
                        (library_type == "Series" and section_type == "show"):
+                        logger.info(f"  ├─ Found library: \033[1m{section_title}\033[0m (type: {section_type})")
                         for location in section["Location"]:
                             location_path = location["path"]
-                            logger.info(f"Found matching library type: {section_title} with path: {location_path}")
+                            logger.info(f"     └─ Path: {location_path}")
                             matching_sections.append((section, location_path))
+                    else:
+                        logger.debug(f"  ├─ Skipping library: {section_title} (type: {section_type})")
 
                 if not matching_sections:
                     error_msg = f"No {library_type} libraries found in Plex"
                     logger.error(error_msg)
                     raise ValueError(error_msg)
 
-                logger.info(f"Found {len(matching_sections)} potential matching sections")
+                logger.info(f"Found \033[1m{len(matching_sections)}\033[0m potential matching sections")
 
                 # Second pass: find best matching section
-                for section, location_path in matching_sections:
-                    logger.info(f"Checking if path {path} matches library path {location_path}")
+                logger.info("Matching path to library sections:")
+                for idx, (section, location_path) in enumerate(matching_sections):
+                    prefix = "  └─ " if idx == len(matching_sections) - 1 else "  ├─ "
+                    logger.info(f"{prefix}Checking if path matches library: \033[1m{section['title']}\033[0m")
                     
                     # Normalize both paths for comparison
                     normalized_scan_path = Path(path).as_posix()
@@ -165,12 +190,14 @@ class MediaServerScanner:
                     # Try different path matching strategies
                     if normalized_scan_path.startswith(normalized_location):
                         section_id = section["key"]
-                        logger.info(f"Found exact path match in section: {section['title']} (id: {section_id})")
+                        logger.info(f"     └─ \033[32mEXACT MATCH\033[0m in section: {section['title']} (id: {section_id})")
                         break
                     elif normalized_location in normalized_scan_path:
                         section_id = section["key"]
-                        logger.info(f"Found partial path match in section: {section['title']} (id: {section_id})")
+                        logger.info(f"     └─ \033[33mPARTIAL MATCH\033[0m in section: {section['title']} (id: {section_id})")
                         break
+                    else:
+                        logger.info(f"     └─ \033[31mNO MATCH\033[0m")
 
                 if not section_id:
                     error_msg = f"No matching library section found for path: {path}"
@@ -179,7 +206,7 @@ class MediaServerScanner:
 
                 # Use the exact movie folder path for scanning
                 scan_path = path  # This is the exact movie folder path we want to scan
-                logger.info(f"Using exact folder path for scan: {scan_path}")
+                logger.info(f"Using exact folder path for scan: \033[1m{scan_path}\033[0m")
 
                 # Properly encode the path parameter
                 from urllib.parse import quote

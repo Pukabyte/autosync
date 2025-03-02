@@ -28,7 +28,7 @@ import random
 import string
 
 # Application version - update this when creating new releases
-VERSION = "0.0.9"
+VERSION = "0.1.0"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -70,11 +70,21 @@ async def lifespan(app: FastAPI):
         logging.addLevelName(logging.WARNING, '\033[33mWARN\033[0m')  # Yellow
         logging.addLevelName(logging.DEBUG, '\033[36mDEBUG\033[0m')   # Cyan
         
+        # Ensure all module loggers have the correct level
+        for logger_name in ['media_server_service', 'radarr_service', 'sonarr_service']:
+            module_logger = logging.getLogger(logger_name)
+            module_logger.setLevel(log_level)
+            # Ensure the logger has a handler
+            if not module_logger.handlers:
+                handler = logging.StreamHandler()
+                handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%Y-%m-%d %H:%M:%S'))
+                module_logger.addHandler(handler)
+        
         # Build startup messages
         logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        logger.info("\033[1mAutoSyncarr\033[0m starting up")
+        logger.info("\033[1mAutosync\033[0m starting up")
         logger.info(f"  ├─ Version: \033[1m{VERSION}\033[0m")
-        logger.info(f"  ├─ Server port: 3536")
+        logger.info(f"  ├─ Server port: \033[1m3536\033[0m")
         logger.info(f"  └─ Log level: \033[1m{config.get('log_level', 'INFO').lower()}\033[0m")
         
         # Convert dict instances to proper types and assign to global variables
@@ -806,15 +816,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                         logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=True)
                         
-                        # Format scan results for better readability
-                        logger.info(f"Scan results summary:")
-                        for idx, result in enumerate(scan_results):
-                            status = result.get("status", "unknown")
-                            status_color = "\033[32m" if status == "success" else "\033[31m"  # Green for success, red for errors
-                            logger.info(f"  {'└─' if idx == len(scan_results)-1 else '├─'} {result.get('server', 'Unknown')} ({result.get('type', 'unknown')}): {status_color}{status}\033[0m")
-                            if status == "error" and "error" in result:
-                                logger.info(f"     └─ Error: {result['error']}")
-                        
                         return {
                             "status": "ok",
                             "message": "No Sonarr instances configured, but media servers were scanned",
@@ -910,15 +911,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     if scan_path:
                         logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=False)
-                        
-                        # Format scan results for better readability
-                        logger.info(f"Scan results summary:")
-                        for idx, result in enumerate(scan_results):
-                            status = result.get("status", "unknown")
-                            status_color = "\033[32m" if status == "success" else "\033[31m"  # Green for success, red for errors
-                            logger.info(f"  {'└─' if idx == len(scan_results)-1 else '├─'} {result.get('server', 'Unknown')} ({result.get('type', 'unknown')}): {status_color}{status}\033[0m")
-                            if status == "error" and "error" in result:
-                                logger.info(f"     └─ Error: {result['error']}")
                         
                         return {
                             "status": "ok",
@@ -1084,6 +1076,16 @@ if __name__ == "__main__":
             "uvicorn.access": {"handlers": ["default"], "level": "INFO", "propagate": False},
         },
     }
+    
+    # Add root logger configuration to ensure all module loggers inherit the correct level
+    config = load_config()
+    log_level = config.get('log_level', 'INFO').upper()
+    log_config["root"] = {"handlers": ["default"], "level": log_level}
+    
+    # Add specific configuration for our module loggers
+    log_config["loggers"]["media_server_service"] = {"level": log_level, "handlers": ["default"], "propagate": False}
+    log_config["loggers"]["radarr_service"] = {"level": log_level, "handlers": ["default"], "propagate": False}
+    log_config["loggers"]["sonarr_service"] = {"level": log_level, "handlers": ["default"], "propagate": False}
     
     uvicorn.run(
         "main:app", 

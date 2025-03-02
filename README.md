@@ -95,6 +95,24 @@ View logs:
 ```bash
 docker logs -f autosync
 ```
+## Screenshots
+
+Here are some screenshots of the Autosync web interface:
+
+### Dashboard
+![Dashboard](screenshots/Dashboard.png)
+
+### Media Server Configuration
+![Media Server Configuration](screenshots/MediaServer.png)
+
+### Radarr Instance Configuration
+![Radarr Instance Configuration](screenshots/RadarrInstance.png)
+
+### Sonarr Instance Configuration
+![Sonarr Instance Configuration](screenshots/SonarrInstance.png)
+
+### Settings
+![Settings](screenshots/Settings.png)
 
 ## Configuration
 

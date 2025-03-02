@@ -193,6 +193,7 @@ class SonarrInstance(BaseModel):
     season_folder: bool = True
     quality_profile_id: int = 1
     language_profile_id: int = 1
+    search_on_sync: bool = False
     enabled_events: List[str] = []
 
     @property

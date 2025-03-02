@@ -187,8 +187,8 @@ async def handle_sonarr_grab(
                         addOptions=SonarrAddSeriesOptions(
                             ignoreEpisodesWithFiles=True,
                             monitor=SonarrMonitorTypes.future,
-                            searchForMissingEpisodes=True,
-                            searchForCutoffUnmetEpisodes=True,
+                            searchForMissingEpisodes=inst.search_on_sync,
+                            searchForCutoffUnmetEpisodes=inst.search_on_sync,
                         ),
                     )
 
@@ -196,6 +196,11 @@ async def handle_sonarr_grab(
                     added = add_series(inst.url, inst.api_key, series)
                     series_id = added["id"]
                     logger.info(f"Added new series (id={series_id}) to {inst.name}")
+                    
+                    # Log if search was enabled
+                    if inst.search_on_sync:
+                        logger.info(f"Search enabled for new series on {inst.name} (search_on_sync=True)")
+                    
                     logger.debug(
                         "Pausing for 2 seconds after adding series so episodes can be added"
                     )
@@ -363,14 +368,18 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                         addOptions=SonarrAddSeriesOptions(
                             ignoreEpisodesWithFiles=True,
                             monitor=SonarrMonitorTypes.future,
-                            searchForMissingEpisodes=True,
-                            searchForCutoffUnmetEpisodes=True,
+                            searchForMissingEpisodes=inst.search_on_sync,
+                            searchForCutoffUnmetEpisodes=inst.search_on_sync,
                         ),
                     )
 
                     added = add_series(inst.url, inst.api_key, series)
                     series_id = added["id"]
                     logger.info(f"Added new series (id={series_id}) to {inst.name}")
+                    
+                    # Log if search was enabled
+                    if inst.search_on_sync:
+                        logger.info(f"Search enabled for new series on {inst.name} (search_on_sync=True)")
 
                     results.append({
                         "instance": inst.name,
@@ -444,7 +453,7 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
             "scanResults": scan_results,
             "scannedPath": scan_path
         }
-        logger.debug(f"Completed processing with response: {response}")
+        logger.info(f"Completed processing with response: {response}")
         return response
 
     except Exception as e:

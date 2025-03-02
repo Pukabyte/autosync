@@ -43,8 +43,8 @@ class MediaServerScanner:
             # Get parent folder for both movies and series
             parent_path = str(Path(path).parent)
             logger.info(f"Scanning path: \033[1m{path}\033[0m")
-            logger.debug(f"  ├─ Parent path: {parent_path}")
-            logger.debug(f"  └─ Content type: {'Series' if is_series else 'Movie'}")
+            logger.debug(f"  ├─ Parent path: \033[1m{parent_path}\033[0m")
+            logger.debug(f"  └─ Content type: \033[1m{'Series' if is_series else 'Movie'}\033[0m")
             
             if is_series:
                 scan_path = path
@@ -54,7 +54,11 @@ class MediaServerScanner:
                 library_type = "Movies"
                 await asyncio.sleep(2)
 
-            logger.debug(f"Using scan path: {scan_path} for library type: {library_type}")
+            logger.debug(f"Using scan path: \033[1m{scan_path}\033[0m for library type: \033[1m{library_type}\033[0m")
+            logger.debug(f"Scan path details:")
+            logger.debug(f"  ├─ Absolute path: \033[1m{Path(scan_path).absolute()}\033[0m")
+            logger.debug(f"  ├─ Path exists: \033[1m{Path(scan_path).exists() if Path(scan_path).is_absolute() else 'Unknown (relative path)'}\033[0m")
+            logger.debug(f"  └─ Path type: \033[1m{'Directory' if Path(scan_path).is_dir() else 'File' if Path(scan_path).is_file() else 'Unknown'}\033[0m")
 
             if not self.servers:
                 logger.error("No media servers configured or all servers are disabled")
@@ -62,7 +66,7 @@ class MediaServerScanner:
 
             results = []
             active_servers = [s for s in self.servers if s.enabled]
-            logger.debug(f"Media servers: {len(active_servers)} enabled out of {len(self.servers)} total")
+            logger.debug(f"Media servers: \033[1m{len(active_servers)}\033[0m enabled out of \033[1m{len(self.servers)}\033[0m total")
             
             if not active_servers:
                 logger.error("All media servers are disabled")
@@ -70,11 +74,11 @@ class MediaServerScanner:
 
             for server in self.servers:
                 if not server.enabled:
-                    logger.debug(f"Skipping disabled server: {server.name}")
+                    logger.debug(f"Skipping disabled server: \033[1m{server.name}\033[0m")
                     continue
                     
                 try:
-                    logger.debug(f"Processing server: name={server.name}, type={server.type}, url={server.url}")
+                    logger.debug(f"Processing server: name=\033[1m{server.name}\033[0m, type=\033[1m{server.type}\033[0m, url=\033[1m{server.url}\033[0m")
                     if server.type == "plex":
                         result = await self._scan_plex(server, scan_path, library_type)
                         logger.info(f"Scan completed for \033[1m{server.name}\033[0m (Plex)")
@@ -107,7 +111,7 @@ class MediaServerScanner:
                         continue
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"Failed to scan {server.type} target={server.name} error=\"{error_msg}\"", exc_info=True)
+                    logger.error(f"Failed to scan \033[1m{server.type}\033[0m target=\033[1m{server.name}\033[0m error=\"\033[1m{error_msg}\033[0m\"", exc_info=True)
                     results.append({
                         "server": server.name,
                         "type": server.type,
@@ -119,11 +123,37 @@ class MediaServerScanner:
                 logger.error("No scan results were generated. Check server configurations.")
                 return [{"status": "error", "error": "No scan results were generated"}]
                 
+            # Add detailed logging of scan results in the exact format requested
+            logger.info(f"Scan results summary:")
+            for idx, result in enumerate(results):
+                prefix = "  └─ " if idx == len(results) - 1 else "  ├─ "
+                server_name = result.get('server', 'Unknown')
+                server_type = result.get('type', 'unknown')
+                status = result.get('status', 'unknown')
+                
+                # Add color to status - green for success, red for error
+                status_colored = f"\033[32m{status}\033[0m" if status == "success" else f"\033[31m{status}\033[0m"
+                
+                # Log the summary line at INFO level with bold formatting for server name and type
+                logger.info(f"{prefix}\033[1m{server_name}\033[0m (\033[1m{server_type}\033[0m): {status_colored}")
+                
+                # Log the details at DEBUG level with the exact indentation requested
+                if result.get('status') == 'success' and 'result' in result:
+                    result_data = result['result']
+                    section_id = result_data.get('section', 'N/A')
+                    scan_url = result_data.get('scan_url', 'N/A')
+                    
+                    # Use proper DEBUG level logs with bold formatting
+                    logger.debug(f"        └─ Section: \033[1m{section_id}\033[0m")
+                    logger.debug(f"        └─ Scan URL: \033[1m{scan_url}\033[0m")
+                elif result.get('status') != 'success' and 'error' in result:
+                    logger.debug(f"        └─ Error: \033[1m{result['error']}\033[0m")
+            
             return results
             
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Unexpected error in scan_path: {error_msg}", exc_info=True)
+            logger.error(f"Unexpected error in scan_path: \033[1m{error_msg}\033[0m", exc_info=True)
             return [{"status": "error", "error": f"Scan path failed: {error_msg}"}]
 
     async def _scan_plex(self, server: PlexServer, path: str, library_type: str) -> Dict[str, Any]:
@@ -133,15 +163,15 @@ class MediaServerScanner:
         }
         
         logger.info(f"Starting Plex scan for server \033[1m{server.name}\033[0m")
-        logger.debug(f"  ├─ URL: {server.url}")
-        logger.debug(f"  ├─ Library type: {library_type}")
-        logger.debug(f"  └─ Path: {path}")
+        logger.debug(f"  ├─ URL: \033[1m{server.url}\033[0m")
+        logger.debug(f"  ├─ Library type: \033[1m{library_type}\033[0m")
+        logger.debug(f"  └─ Path: \033[1m{path}\033[0m")
         
         async with aiohttp.ClientSession() as session:
             try:
                 # First get all library sections
                 sections_url = urljoin(server.url, "library/sections")
-                logger.debug(f"Fetching Plex library sections from: {sections_url}")
+                logger.debug(f"Fetching Plex library sections from: \033[1m{sections_url}\033[0m")
                 async with session.get(sections_url, headers=headers, timeout=30) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -157,34 +187,25 @@ class MediaServerScanner:
                 matching_sections = []
 
                 # First pass: collect all sections of the correct type
-                logger.debug(f"Searching for matching {library_type} libraries:")
                 for section in sections["MediaContainer"]["Directory"]:
                     section_type = section["type"]
                     section_title = section["title"]
                     
                     if (library_type == "Movies" and section_type == "movie") or \
                        (library_type == "Series" and section_type == "show"):
-                        logger.debug(f"  ├─ Found library: \033[1m{section_title}\033[0m (type: {section_type})")
                         for location in section["Location"]:
                             location_path = location["path"]
-                            logger.debug(f"     └─ Path: {location_path}")
                             matching_sections.append((section, location_path))
-                    else:
-                        logger.debug(f"  ├─ Skipping library: {section_title} (type: {section_type})")
 
                 if not matching_sections:
-                    error_msg = f"No {library_type} libraries found in Plex"
+                    error_msg = f"No \033[1m{library_type}\033[0m libraries found in Plex"
                     logger.error(error_msg)
                     raise ValueError(error_msg)
 
                 logger.debug(f"Found \033[1m{len(matching_sections)}\033[0m potential matching sections")
 
                 # Second pass: find best matching section
-                logger.debug("Matching path to library sections:")
                 for idx, (section, location_path) in enumerate(matching_sections):
-                    prefix = "  └─ " if idx == len(matching_sections) - 1 else "  ├─ "
-                    logger.debug(f"{prefix}Checking if path matches library: \033[1m{section['title']}\033[0m")
-                    
                     # Normalize both paths for comparison
                     normalized_scan_path = Path(path).as_posix()
                     normalized_location = Path(location_path).as_posix()
@@ -192,19 +213,27 @@ class MediaServerScanner:
                     # Try different path matching strategies
                     if normalized_scan_path.startswith(normalized_location):
                         section_id = section["key"]
-                        logger.info(f"Found \033[32mEXACT MATCH\033[0m in section: {section['title']} (id: {section_id})")
+                        logger.info(f"Found \033[32mExact match\033[0m in section: {section['title']} (id: {section_id})")
                         break
                     elif normalized_location in normalized_scan_path:
                         section_id = section["key"]
-                        logger.info(f"Found \033[33mPARTIAL MATCH\033[0m in section: {section['title']} (id: {section_id})")
+                        logger.info(f"Found \033[33mPartial match\033[0m in section: {section['title']} (id: {section_id})")
                         break
-                    else:
-                        logger.debug(f"     └─ \033[31mNO MATCH\033[0m")
 
                 if not section_id:
-                    error_msg = f"No matching library section found for path: {path}"
+                    error_msg = f"No matching library section found for path: \033[1m{path}\033[0m"
                     logger.error(f"{error_msg}. Available {library_type} libraries: {[s[0]['title'] for s in matching_sections]}")
                     raise ValueError(error_msg)
+
+                # Log detailed section information
+                for section, location_path in matching_sections:
+                    if section["key"] == section_id:
+                        logger.debug(f"Selected section details:")
+                        logger.debug(f"  ├─ Section ID: \033[1m{section_id}\033[0m")
+                        logger.debug(f"  ├─ Section Title: \033[1m{section['title']}\033[0m")
+                        logger.debug(f"  ├─ Section Type: \033[1m{section['type']}\033[0m")
+                        logger.debug(f"  └─ Section Path: \033[1m{location_path}\033[0m")
+                        break
 
                 # Use the exact movie folder path for scanning
                 scan_path = path  # This is the exact movie folder path we want to scan
@@ -216,7 +245,14 @@ class MediaServerScanner:
                 
                 # Construct the scan URL with the correct format
                 scan_url = f"{server.url}/library/sections/{section_id}/refresh?path={encoded_path}"
-                logger.debug(f"Initiating Plex scan with URL: {scan_url}")
+                logger.debug(f"Initiating Plex scan with URL: \033[1m{scan_url}\033[0m")
+                logger.debug(f"  ├─ Server URL: \033[1m{server.url}\033[0m")
+                logger.debug(f"  ├─ Section ID: \033[1m{section_id}\033[0m")
+                logger.debug(f"  └─ Encoded Path: \033[1m{encoded_path}\033[0m")
+                
+                # Remove duplicate INFO logs
+                # logger.info(f"SCAN DETAILS - URL: \033[1m{scan_url}\033[0m")
+                # logger.info(f"SCAN DETAILS - Section: {section_id} (Title: {section.get('title', 'Unknown')})")
                 
                 async with session.get(scan_url, headers=headers, timeout=30) as response:
                     if response.status != 200:
@@ -228,12 +264,12 @@ class MediaServerScanner:
                     scan_response = await response.text()
                     logger.debug(f"Scan response: {scan_response}")
                     
-                return {
-                    "message": "Scan initiated",
-                    "section": section_id,
-                    "path": scan_path,
-                    "scan_url": scan_url
-                }
+                    return {
+                        "message": "Scan initiated",
+                        "section": section_id,
+                        "path": scan_path,
+                        "scan_url": scan_url
+                    }
                 
             except aiohttp.ClientError as e:
                 logger.error(f"Plex API error: {str(e)}", exc_info=True)

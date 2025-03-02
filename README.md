@@ -29,8 +29,6 @@ It also supports scanning media servers for new content upon import.
 
 - Synchronizes downloads between multiple Sonarr instances
 - Synchronizes downloads between multiple Radarr instances
-- Configurable quality profiles per instance
-- Optional automatic search triggering
 - Docker support for easy deployment
 - Media server scanning for new content
 - Web UI for configuration management

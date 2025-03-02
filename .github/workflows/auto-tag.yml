@@ -96,8 +96,8 @@ jobs:
       # Build and push Docker image using Docker CLI directly
       - name: Build and push Docker image
         run: |
-          # Set image name with registry
-          IMAGE_NAME=ghcr.io/${{ github.repository }}
+          # Set image name with registry (ensuring lowercase)
+          IMAGE_NAME=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           
           # Build the Docker image
           docker build -t $IMAGE_NAME:${{ env.NEW_TAG }} -t $IMAGE_NAME:latest .

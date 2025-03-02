@@ -28,7 +28,7 @@ import random
 import string
 
 # Application version - update this when creating new releases
-VERSION = "0.1.4"
+VERSION = "0.1.0"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)

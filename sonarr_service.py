@@ -322,16 +322,15 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
         series_path = webhook_data.series.path
         episode_path = payload.get("episodeFile", {}).get("path")
         
-        logger.debug(f"Series path: {series_path}")
-        logger.debug(f"Episode file path: {episode_path}")
+        logger.debug(f"Path details:")
+        logger.debug(f"  ├─ Series path: \033[1m{series_path}\033[0m")
+        logger.debug(f"  └─ Episode file path: \033[1m{episode_path}\033[0m")
 
         if not instances:
             logger.warning("No Sonarr instances provided")
             return {"status": "error", "reason": "No Sonarr instances configured"}
 
         logger.debug(f"Found {len(instances)} Sonarr instance(s) to process")
-        for inst in instances:
-            logger.debug(f"Instance {inst.name}: URL={inst.url}, enabled_events={inst.enabled_events}")
 
         # Get sync interval from config
         config = get_config()
@@ -346,17 +345,16 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                     logger.debug(f"Waiting {sync_interval} seconds before processing next instance")
                     await asyncio.sleep(sync_interval)
                 
-                logger.debug(f"Processing Sonarr instance: {inst.name}")
+                logger.debug(f"Processing instance {inst.name}:")
+                logger.debug(f"  ├─ URL: {inst.url}")
+                logger.debug(f"  └─ Events: {', '.join(inst.enabled_events)}")
 
                 # Check if series exists
-                logger.debug(f"Checking if series exists in {inst.name} (TVDB ID: {webhook_data.series.tvdbId})")
                 existing = get_series_by_tvdbid(inst.url, inst.api_key, webhook_data.series.tvdbId)
-                logger.debug(f"Existing series check result: {existing}")
 
                 if not existing:
                     logger.info(f"Series not found in {inst.name}, adding new series")
                     # Create series model for addition
-                    logger.debug(f"Adding series to {inst.name} with path={inst.root_folder_path}, quality_profile={inst.quality_profile_id}")
                     series = SonarrSeries(
                         tvdbId=webhook_data.series.tvdbId,
                         title=webhook_data.series.title,
@@ -391,18 +389,8 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                     logger.debug(f"Series already exists (id={series_id}) on {inst.name}")
                     
                     # Refresh and rescan the series
-                    logger.debug(f"Refreshing series (id={series_id}) on {inst.name}")
                     refresh_result = refresh_series(inst.url, inst.api_key, series_id)
-                    logger.debug(f"Refresh result: {refresh_result}")
-                    
-                    # Apply sync interval between operations
-                    if sync_interval > 0:
-                        logger.debug(f"Waiting {sync_interval} seconds before rescanning")
-                        await asyncio.sleep(sync_interval)
-                    
-                    logger.debug(f"Rescanning series (id={series_id}) on {inst.name}")
                     rescan_result = rescan_series(inst.url, inst.api_key, series_id)
-                    logger.debug(f"Rescan result: {rescan_result}")
                     
                     results.append({
                         "instance": inst.name,
@@ -416,9 +404,9 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
 
         # Initialize scanner with media servers from config
         media_servers = config.get("media_servers", [])
-        logger.debug(f"Found {len(media_servers)} media server(s) to scan")
-        for server in media_servers:
-            logger.debug(f"Media server config: name={server.get('name')}, type={server.get('type')}, enabled={server.get('enabled')}")
+        logger.debug(f"Media server scan details:")
+        logger.debug(f"  ├─ Total servers: \033[1m{len(media_servers)}\033[0m")
+        logger.debug(f"  └─ Active servers: \033[1m{len([s for s in media_servers if s.get('enabled')])}\033[0m")
         
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results:

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Manual Scan - Autosync{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.type }} alert-dismissible fade show" role="alert">
+        {{ message.text }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Manual Scan</h5>
+                    <a href="/" class="btn btn-sm btn-outline-secondary">Back to Dashboard</a>
+                </div>
+                <div class="card-body">
+                    <form id="manualScanForm" onsubmit="submitManualScan(event)">
+                        <div class="mb-3">
+                            <label for="scanPath" class="form-label">Path to Scan</label>
+                            <input type="text" class="form-control" id="scanPath" name="path" required>
+                            <div class="form-text">Enter the full path to the movie or TV show folder</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="contentType" class="form-label">Content Type</label>
+                            <select class="form-select" id="contentType" name="content_type" required>
+                                <option value="">Select content type...</option>
+                                <option value="movie">Movie</option>
+                                <option value="series">TV Series</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Start Scan</button>
+                    </form>
+                    <div id="scanResult" class="mt-3" style="display: none;">
+                        <h6 class="mb-2">Scan Results:</h6>
+                        <div class="alert alert-info">
+                            <pre class="mb-0" style="white-space: pre-wrap;"><code id="scanResultContent"></code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitManualScan(event) {
+    event.preventDefault();
+    const form = event.target;
+    const submitButton = form.querySelector('button[type="submit"]');
+    const resultDiv = document.getElementById('scanResult');
+    const resultContent = document.getElementById('scanResultContent');
+    
+    // Disable submit button and show loading state
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Scanning...';
+    
+    try {
+        const formData = new FormData(form);
+        const path = formData.get('path');
+        const contentType = formData.get('content_type');
+        
+        // Create webhook payload
+        const payload = {
+            eventType: "ManualScan",
+            path: path,
+            contentType: contentType,
+            manual: true
+        };
+        
+        const response = await fetch('/webhook', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        const result = await response.json();
+        
+        // Format the results nicely
+        let formattedResult = '';
+        if (result.status === 'ok' || result.status === 'warning') {
+            formattedResult = `Status: ${result.status}\nMessage: ${result.message}\n\nScan Results:\n`;
+            result.scan_results.forEach((scan, index) => {
+                formattedResult += `\n${index + 1}. ${scan.server} (${scan.type}): ${scan.status}`;
+                if (scan.status === 'success' && scan.result) {
+                    formattedResult += `\n   Section: ${scan.result.section || 'N/A'}`;
+                    formattedResult += `\n   Scan URL: ${scan.result.scan_url || 'N/A'}`;
+                } else if (scan.error) {
+                    formattedResult += `\n   Error: ${scan.error}`;
+                }
+            });
+        } else {
+            formattedResult = `Error: ${result.detail || result.message || 'Unknown error'}`;
+        }
+        
+        // Show results
+        resultContent.textContent = formattedResult;
+        resultDiv.style.display = 'block';
+        
+        if (!response.ok) {
+            throw new Error(result.detail || 'Scan failed');
+        }
+    } catch (error) {
+        resultContent.textContent = `Error: ${error.message}`;
+        resultDiv.style.display = 'block';
+    } finally {
+        // Reset button state
+        submitButton.disabled = false;
+        submitButton.textContent = 'Start Scan';
+    }
+}
+</script>
+{% endblock %} 

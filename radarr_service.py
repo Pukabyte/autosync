@@ -173,17 +173,16 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
         movie_path = movie_file.get("path")
         relative_path = movie_file.get("relativePath")
 
-        logger.debug(f"Movie folder path: {folder_path}")
-        logger.debug(f"Movie file path: {movie_path}")
-        logger.debug(f"Movie relative path: {relative_path}")
+        logger.debug(f"Path details:")
+        logger.debug(f"  ├─ Folder path: \033[1m{folder_path}\033[0m")
+        logger.debug(f"  ├─ Movie file path: \033[1m{movie_path}\033[0m")
+        logger.debug(f"  └─ Relative path: \033[1m{relative_path}\033[0m")
 
         if not instances:
             logger.warning("No Radarr instances provided")
             return {"status": "error", "reason": "No Radarr instances configured"}
 
         logger.debug(f"Found \033[1m{len(instances)}\033[0m Radarr instance(s) to process")
-        for inst in instances:
-            logger.debug(f"Instance {inst.name}: URL={inst.url}, enabled_events={inst.enabled_events}")
 
         # Get sync interval from config
         config = get_config()
@@ -198,17 +197,16 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
                     logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before processing next instance")
                     await asyncio.sleep(sync_interval)
                 
-                logger.debug(f"Processing Radarr instance: \033[1m{inst.name}\033[0m")
+                logger.debug(f"Processing instance \033[1m{inst.name}\033[0m:")
+                logger.debug(f"  ├─ URL: \033[1m{inst.url}\033[0m")
+                logger.debug(f"  └─ Events: \033[1m{', '.join(inst.enabled_events)}\033[0m")
 
                 # Check if movie exists
-                logger.debug(f"Checking if movie exists in \033[1m{inst.name}\033[0m (TMDB ID: \033[1m{tmdb_id}\033[0m)")
                 existing = get_movie_by_tmdbid(inst.url, inst.api_key, tmdb_id)
-                logger.debug(f"Existing movie check result: \033[1m{existing}\033[0m")
 
                 if not existing:
                     logger.info(f"Movie not found in \033[1m{inst.name}\033[0m, adding new movie")
                     # Add movie
-                    logger.debug(f"Adding movie to \033[1m{inst.name}\033[0m with path=\033[1m{inst.root_folder_path}\033[0m, quality_profile=\033[1m{inst.quality_profile_id}\033[0m")
                     added = add_movie(
                         inst.url,
                         inst.api_key,
@@ -241,9 +239,9 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
 
         # Initialize scanner with media servers from config
         media_servers = config.get("media_servers", [])
-        logger.debug(f"Found \033[1m{len(media_servers)}\033[0m media server(s) to scan")
-        for server in media_servers:
-            logger.debug(f"Media server config: name=\033[1m{server.get('name')}\033[0m, type=\033[1m{server.get('type')}\033[0m, enabled=\033[1m{server.get('enabled')}\033[0m")
+        logger.debug(f"Media server scan details:")
+        logger.debug(f"  ├─ Total servers: \033[1m{len(media_servers)}\033[0m")
+        logger.debug(f"  └─ Active servers: \033[1m{len([s for s in media_servers if s.get('enabled')])}\033[0m")
         
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results:

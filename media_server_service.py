@@ -54,8 +54,10 @@ class MediaServerScanner:
                 library_type = "Movies"
                 await asyncio.sleep(2)
 
-            logger.debug(f"Using scan path: \033[1m{scan_path}\033[0m for library type: \033[1m{library_type}\033[0m")
-            logger.debug(f"Scan path details:")
+            # Remove redundant path logging and consolidate path details
+            logger.debug(f"Path details:")
+            logger.debug(f"  ├─ Scan path: \033[1m{scan_path}\033[0m")
+            logger.debug(f"  ├─ Library type: \033[1m{library_type}\033[0m")
             logger.debug(f"  ├─ Absolute path: \033[1m{Path(scan_path).absolute()}\033[0m")
             logger.debug(f"  ├─ Path exists: \033[1m{Path(scan_path).exists() if Path(scan_path).is_absolute() else 'Unknown (relative path)'}\033[0m")
             logger.debug(f"  └─ Path type: \033[1m{'Directory' if Path(scan_path).is_dir() else 'File' if Path(scan_path).is_file() else 'Unknown'}\033[0m")
@@ -245,7 +247,8 @@ class MediaServerScanner:
                 
                 # Construct the scan URL with the correct format
                 scan_url = f"{server.url}/library/sections/{section_id}/refresh?path={encoded_path}"
-                logger.debug(f"Initiating Plex scan with URL: \033[1m{scan_url}\033[0m")
+                logger.debug(f"Scan details:")
+                logger.debug(f"  ├─ Scan URL: \033[1m{scan_url}\033[0m")
                 logger.debug(f"  ├─ Server URL: \033[1m{server.url}\033[0m")
                 logger.debug(f"  ├─ Section ID: \033[1m{section_id}\033[0m")
                 logger.debug(f"  └─ Encoded Path: \033[1m{encoded_path}\033[0m")

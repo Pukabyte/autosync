@@ -26,9 +26,10 @@ from utils import load_config, get_config, save_config, parse_time_string
 from media_server_service import MediaServerScanner
 import random
 import string
+from pathlib import Path
 
 # Application version - update this when creating new releases
-VERSION = "0.0.10"
+VERSION = "0.0.11"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -588,6 +589,15 @@ async def update_settings(
             status_code=500
         )
 
+@app.get("/manual-scan")
+async def manual_scan_form(request: Request):
+    """Render the manual scan page."""
+    config = get_config()
+    return templates.TemplateResponse(
+        "manual_scan.html",
+        get_template_context(request, config=config, messages=[])
+    )
+
 # ------------------------------------------------------------------------------
 # API Routes
 # ------------------------------------------------------------------------------
@@ -734,6 +744,67 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
         event_type = payload.get("eventType")
         if not event_type:
             raise ValueError("Webhook payload missing eventType")
+
+        # Handle manual scan requests
+        if event_type == "ManualScan":
+            try:
+                path = payload.get("path")
+                content_type = payload.get("contentType")
+                
+                if not path or not content_type:
+                    raise ValueError("Manual scan requires path and contentType")
+                
+                logger.info(f"Manual scan requested for path: \033[1m{path}\033[0m")
+                logger.info(f"Content type: \033[1m{content_type}\033[0m")
+                
+                config = get_config()
+                media_servers = config.get("media_servers", [])
+                
+                if not media_servers:
+                    logger.error("No media servers configured")
+                    raise HTTPException(status_code=400, detail="No media servers configured")
+                
+                active_servers = [s for s in media_servers if s.get("enabled", False)]
+                if not active_servers:
+                    logger.error("No active media servers found")
+                    raise HTTPException(status_code=400, detail="No active media servers found")
+                    
+                logger.info(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
+                
+                # Validate content type
+                if content_type not in ["series", "movie"]:
+                    logger.error(f"Invalid content type: {content_type}")
+                    raise HTTPException(status_code=400, detail="Content type must be either 'series' or 'movie'")
+                
+                # Initialize scanner and perform scan
+                scanner = MediaServerScanner(media_servers)
+                scan_results = await scanner.scan_path(path, is_series=(content_type == "series"))
+                
+                # Check if any scans were successful
+                successful_scans = [r for r in scan_results if r.get("status") == "success"]
+                if not successful_scans:
+                    logger.warning("No successful scans completed")
+                    return {
+                        "status": "warning",
+                        "message": "No successful scans completed",
+                        "path": path,
+                        "content_type": content_type,
+                        "scan_results": scan_results
+                    }
+                
+                return {
+                    "status": "ok",
+                    "message": f"Successfully scanned {len(successful_scans)} media server(s)",
+                    "path": path,
+                    "content_type": content_type,
+                    "scan_results": scan_results
+                }
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Manual scan failed: {str(e)}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
 
         # Get config for event validation
         config = get_config()

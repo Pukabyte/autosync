@@ -299,12 +299,8 @@ async def handle_sonarr_grab(
 async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
     """Handle Sonarr import webhook with validated instances."""
     try:
-        # Log the full payload for debugging
-        logger.debug(f"Received Sonarr webhook payload: {payload}")
-        
         # Check event type
         event_type = payload.get("eventType", "")
-        # Accept both "Import" and "Download" events
         if event_type not in ["Import", "Download"]:
             logger.debug(f"Ignoring non-Import event: {event_type}")
             return {"status": "ignored", "reason": f"Sonarr event is {event_type}"}
@@ -312,48 +308,38 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
         webhook_data = WebhookPayload(**payload)
 
         logger.info(
-            "Processing Sonarr Import: Title=%s, TVDB=%s, Episodes=%s",
-            webhook_data.series.title,
-            webhook_data.series.tvdbId,
-            [f"S{ep.seasonNumber}E{ep.episodeNumber}" for ep in webhook_data.episodes]
+            f"Processing Sonarr Import: Title=\033[1m{webhook_data.series.title}\033[0m, TVDB=\033[1m{webhook_data.series.tvdbId}\033[0m, Episodes=\033[1m{[f'S{ep.seasonNumber}E{ep.episodeNumber}' for ep in webhook_data.episodes]}\033[0m"
         )
 
         # Get all possible paths from the payload
         series_path = webhook_data.series.path
         episode_path = payload.get("episodeFile", {}).get("path")
-        
-        logger.debug(f"Path details:")
-        logger.debug(f"  ├─ Series path: \033[1m{series_path}\033[0m")
-        logger.debug(f"  └─ Episode file path: \033[1m{episode_path}\033[0m")
 
         if not instances:
             logger.warning("No Sonarr instances provided")
             return {"status": "error", "reason": "No Sonarr instances configured"}
 
-        logger.debug(f"Found {len(instances)} Sonarr instance(s) to process")
+        logger.debug(f"Processing \033[1m{len(instances)}\033[0m Sonarr instance(s)")
 
         # Get sync interval from config
         config = get_config()
         sync_interval = parse_time_string(config.get("sync_interval", "0"))
-        logger.debug(f"Using sync interval of {sync_interval} seconds between operations")
 
         results = []
         for i, inst in enumerate(instances):
             try:
                 # Apply sync interval between instances (but not before the first one)
                 if i > 0 and sync_interval > 0:
-                    logger.debug(f"Waiting {sync_interval} seconds before processing next instance")
+                    logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before next instance")
                     await asyncio.sleep(sync_interval)
                 
-                logger.debug(f"Processing instance {inst.name}:")
-                logger.debug(f"  ├─ URL: {inst.url}")
-                logger.debug(f"  └─ Events: {', '.join(inst.enabled_events)}")
+                logger.info(f"Processing instance \033[1m{inst.name}\033[0m")
 
                 # Check if series exists
                 existing = get_series_by_tvdbid(inst.url, inst.api_key, webhook_data.series.tvdbId)
 
                 if not existing:
-                    logger.info(f"Series not found in {inst.name}, adding new series")
+                    logger.info(f"Adding new series to \033[1m{inst.name}\033[0m")
                     # Create series model for addition
                     series = SonarrSeries(
                         tvdbId=webhook_data.series.tvdbId,
@@ -373,11 +359,9 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
 
                     added = add_series(inst.url, inst.api_key, series)
                     series_id = added["id"]
-                    logger.info(f"Added new series (id={series_id}) to {inst.name}")
                     
-                    # Log if search was enabled
                     if inst.search_on_sync:
-                        logger.info(f"Search enabled for new series on {inst.name} (search_on_sync=True)")
+                        logger.debug(f"Search enabled for new series on \033[1m{inst.name}\033[0m")
 
                     results.append({
                         "instance": inst.name,
@@ -386,7 +370,7 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                     })
                 else:
                     series_id = existing[0]["id"]
-                    logger.debug(f"Series already exists (id={series_id}) on {inst.name}")
+                    logger.debug(f"Series exists in \033[1m{inst.name}\033[0m (id=\033[1m{series_id}\033[0m)")
                     
                     # Refresh and rescan the series
                     refresh_result = refresh_series(inst.url, inst.api_key, series_id)
@@ -399,18 +383,17 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                     })
 
             except Exception as e:
-                logger.error(f"Error processing instance {inst.name}: {str(e)}", exc_info=True)
+                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: {str(e)}")
                 results.append({"instance": inst.name, "error": str(e)})
 
         # Initialize scanner with media servers from config
         media_servers = config.get("media_servers", [])
-        logger.debug(f"Media server scan details:")
-        logger.debug(f"  ├─ Total servers: \033[1m{len(media_servers)}\033[0m")
-        logger.debug(f"  └─ Active servers: \033[1m{len([s for s in media_servers if s.get('enabled')])}\033[0m")
+        active_servers = [s for s in media_servers if s.get('enabled')]
+        logger.debug(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
         
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results:
-            logger.debug(f"Waiting {sync_interval} seconds before scanning media servers")
+            logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(media_servers)
@@ -419,31 +402,27 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
         scan_path = None
         if series_path:  # Use series path for better Plex library scanning
             scan_path = series_path
-            logger.debug(f"Using series path for scanning: {scan_path}")
         elif episode_path:  # Fallback to episode path if series path not available
             # For TV shows, scan the season folder (one up from episode)
             scan_path = str(Path(episode_path).parent)
-            logger.debug(f"Using episode parent path for scanning: {scan_path}")
         
         scan_results = []
         if scan_path:
-            logger.info(f"Initiating scan for path: {scan_path}")
+            logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
             scan_results = await scanner.scan_path(scan_path, is_series=True)
-            logger.debug(f"Scan results: {scan_results}")
         else:
             logger.warning("No valid path available to scan")
 
         response = {
             "status": "ok",
-            "sonarrTitle": webhook_data.series.title,
+            "seriesTitle": webhook_data.series.title,
             "tvdbId": webhook_data.series.tvdbId,
             "results": results,
             "scanResults": scan_results,
             "scannedPath": scan_path
         }
-        logger.info(f"Completed processing with response: {response}")
         return response
 
     except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
+        logger.error(f"Error processing webhook: {str(e)}")
         return {"status": "error", "error": str(e)}

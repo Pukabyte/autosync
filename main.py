@@ -29,7 +29,7 @@ import string
 from pathlib import Path
 
 # Application version - update this when creating new releases
-VERSION = "0.0.11"
+VERSION = "0.0.12"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)

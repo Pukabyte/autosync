@@ -43,7 +43,7 @@ It also supports scanning media servers for new content upon import.
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/autosync.git
+   git clone https://github.com/pukabyte/autosync.git
    cd autosync
    ```
 

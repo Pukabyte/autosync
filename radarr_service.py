@@ -147,12 +147,8 @@ async def handle_radarr_grab(
 async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
     """Handle Radarr import webhook with validated instances."""
     try:
-        # Log the full payload for debugging
-        logger.debug(f"Received Radarr webhook payload: {payload}")
-        
         # Check event type
         event_type = payload.get("eventType", "")
-        # Accept both "Import" and "Download" events
         if event_type not in ["Import", "Download"]:
             logger.debug(f"Ignoring non-Import event: {event_type}")
             return {"status": "ignored", "reason": f"Radarr event is {event_type}"}
@@ -164,48 +160,38 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
         title = movie_data.get("title", "Unknown")
         year = movie_data.get("year")
 
-        logger.info(
-            f"Processing Radarr Import: Title={title}, TMDB={tmdb_id}, Year={year}"
-        )
+        logger.info(f"Processing Radarr Import: Title=\033[1m{title}\033[0m, TMDB=\033[1m{tmdb_id}\033[0m, Year=\033[1m{year}\033[0m")
 
         # Get all possible paths from the payload
         folder_path = movie_data.get("folderPath")
         movie_path = movie_file.get("path")
         relative_path = movie_file.get("relativePath")
 
-        logger.debug(f"Path details:")
-        logger.debug(f"  ├─ Folder path: \033[1m{folder_path}\033[0m")
-        logger.debug(f"  ├─ Movie file path: \033[1m{movie_path}\033[0m")
-        logger.debug(f"  └─ Relative path: \033[1m{relative_path}\033[0m")
-
         if not instances:
             logger.warning("No Radarr instances provided")
             return {"status": "error", "reason": "No Radarr instances configured"}
 
-        logger.debug(f"Found \033[1m{len(instances)}\033[0m Radarr instance(s) to process")
+        logger.debug(f"Processing \033[1m{len(instances)}\033[0m Radarr instance(s)")
 
         # Get sync interval from config
         config = get_config()
         sync_interval = parse_time_string(config.get("sync_interval", "0"))
-        logger.debug(f"Using sync interval of \033[1m{sync_interval}\033[0m seconds between operations")
 
         results = []
         for i, inst in enumerate(instances):
             try:
                 # Apply sync interval between instances (but not before the first one)
                 if i > 0 and sync_interval > 0:
-                    logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before processing next instance")
+                    logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before next instance")
                     await asyncio.sleep(sync_interval)
                 
-                logger.debug(f"Processing instance \033[1m{inst.name}\033[0m:")
-                logger.debug(f"  ├─ URL: \033[1m{inst.url}\033[0m")
-                logger.debug(f"  └─ Events: \033[1m{', '.join(inst.enabled_events)}\033[0m")
+                logger.info(f"Processing instance \033[1m{inst.name}\033[0m")
 
                 # Check if movie exists
                 existing = get_movie_by_tmdbid(inst.url, inst.api_key, tmdb_id)
 
                 if not existing:
-                    logger.info(f"Movie not found in \033[1m{inst.name}\033[0m, adding new movie")
+                    logger.info(f"Adding new movie to \033[1m{inst.name}\033[0m")
                     # Add movie
                     added = add_movie(
                         inst.url,
@@ -217,8 +203,6 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
                         inst.quality_profile_id,
                     )
                     movie_id = added["id"]
-                    logger.info(f"Added new movie (id=\033[1m{movie_id}\033[0m) to \033[1m{inst.name}\033[0m")
-
                     results.append({
                         "instance": inst.name,
                         "action": "added_movie",
@@ -226,7 +210,7 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
                     })
                 else:
                     movie_id = existing[0]["id"]
-                    logger.debug(f"Movie already exists (id=\033[1m{movie_id}\033[0m) on \033[1m{inst.name}\033[0m")
+                    logger.debug(f"Movie exists in \033[1m{inst.name}\033[0m (id=\033[1m{movie_id}\033[0m)")
                     results.append({
                         "instance": inst.name,
                         "action": "movie_exists",
@@ -234,14 +218,13 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
                     })
 
             except Exception as e:
-                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: \033[1m{str(e)}\033[0m", exc_info=True)
+                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: {str(e)}")
                 results.append({"instance": inst.name, "error": str(e)})
 
         # Initialize scanner with media servers from config
         media_servers = config.get("media_servers", [])
-        logger.debug(f"Media server scan details:")
-        logger.debug(f"  ├─ Total servers: \033[1m{len(media_servers)}\033[0m")
-        logger.debug(f"  └─ Active servers: \033[1m{len([s for s in media_servers if s.get('enabled')])}\033[0m")
+        active_servers = [s for s in media_servers if s.get('enabled')]
+        logger.debug(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
         
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results:
@@ -254,32 +237,28 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
         scan_path = None
         if folder_path:  # Use folder path for better Plex library scanning
             scan_path = folder_path
-            logger.debug(f"Using movie folder path for scanning: \033[1m{scan_path}\033[0m")
         elif movie_path:  # Fallback to file path if folder path not available
             scan_path = movie_path
-            logger.debug(f"Using movie file path for scanning: \033[1m{scan_path}\033[0m")
         
         scan_results = []
         if scan_path:
             logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
             scan_results = await scanner.scan_path(scan_path, is_series=False)
-            logger.debug(f"Scan results: \033[1m{scan_results}\033[0m")
         else:
             logger.warning("No valid path available to scan")
 
         response = {
             "status": "ok",
-            "radarrTitle": title,
+            "movieTitle": title,
             "tmdbId": tmdb_id,
             "results": results,
             "scanResults": scan_results,
             "scannedPath": scan_path
         }
-        logger.info(f"Completed processing with response: \033[1m{response}\033[0m")
         return response
 
     except Exception as e:
-        logger.error(f"Error processing webhook: \033[1m{str(e)}\033[0m", exc_info=True)
+        logger.error(f"Error processing webhook: {str(e)}")
         return {"status": "error", "error": str(e)}
 
 

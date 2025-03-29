@@ -27,9 +27,10 @@ from media_server_service import MediaServerScanner
 import random
 import string
 from pathlib import Path
+import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.13"
+VERSION = "0.0.15"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -617,6 +618,68 @@ async def manual_scan_form(request: Request):
         "manual_scan.html",
         get_template_context(request, config=config, messages=[])
     )
+
+@app.post("/test-connection")
+async def test_connection(
+    type: str = Form(...),
+    url: str = Form(...),
+    api_key: Optional[str] = Form(None),
+    token: Optional[str] = Form(None)
+) -> Dict[str, Any]:
+    """Test connection to a Sonarr/Radarr instance or media server."""
+    try:
+        if type.lower() in ["sonarr", "radarr"]:
+            # Test Sonarr/Radarr connection
+            test_url = f"{url}/api/v3/system/status"
+            headers = {"X-Api-Key": api_key}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(test_url, headers=headers, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return {
+                            "status": "success",
+                            "message": f"Successfully connected to {type}",
+                            "version": data.get("version", "unknown")
+                        }
+                    else:
+                        error_text = await response.text()
+                        return {
+                            "status": "error",
+                            "message": f"Failed to connect to {type}: {error_text}"
+                        }
+        elif type.lower() in ["plex", "jellyfin", "emby"]:
+            # Test media server connection
+            if type.lower() == "plex":
+                test_url = f"{url}/library/sections"
+                headers = {"X-Plex-Token": token}
+            else:  # Jellyfin or Emby
+                test_url = f"{url}/Library/SelectableMediaFolders"
+                headers = {"X-MediaBrowser-Token": api_key}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(test_url, headers=headers, timeout=10) as response:
+                    if response.status == 200:
+                        return {
+                            "status": "success",
+                            "message": f"Successfully connected to {type}"
+                        }
+                    else:
+                        error_text = await response.text()
+                        return {
+                            "status": "error",
+                            "message": f"Failed to connect to {type}: {error_text}"
+                        }
+        else:
+            return {
+                "status": "error",
+                "message": f"Unsupported type: {type}"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Connection test failed: {str(e)}"
+        }
 
 # ------------------------------------------------------------------------------
 # API Routes

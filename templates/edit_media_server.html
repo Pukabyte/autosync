@@ -14,29 +14,42 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-body">
-                <form method="post" action="/media-servers/edit/{{ server.name }}">
-                    <input type="hidden" name="name" value="{{ server.name }}">
-                    <input type="hidden" id="server_type" name="type" value="{{ server.type }}">
+                <form id="editMediaServerForm" hx-post="/media-servers/edit/{{ server.name }}" hx-target="#main-content">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="name" name="name" value="{{ server.name }}" readonly>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="type" class="form-label">Type</label>
+                        <select class="form-select" id="type" name="type" required onchange="updateAuthFields()">
+                            <option value="plex" {% if server.type == "plex" %}selected{% endif %}>Plex</option>
+                            <option value="jellyfin" {% if server.type == "jellyfin" %}selected{% endif %}>Jellyfin</option>
+                            <option value="emby" {% if server.type == "emby" %}selected{% endif %}>Emby</option>
+                        </select>
+                    </div>
                     
                     <div class="mb-3">
                         <label for="url" class="form-label">URL</label>
-                        <input type="url" class="form-control" id="url" name="url" required value="{{ server.url }}">
+                        <div class="input-group">
+                            <input type="url" class="form-control" id="url" name="url" value="{{ server.url }}" required>
+                            <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
+                        </div>
+                        <div id="connectionStatus" class="form-text"></div>
                         <div class="form-text">The full URL to your media server</div>
                     </div>
                     
-                    {% if server.type == 'plex' %}
-                    <div class="mb-3" id="token_field">
+                    <div class="mb-3">
                         <label for="token" class="form-label">Plex Token</label>
-                        <input type="text" class="form-control" id="token" name="token" required value="{{ server.token }}">
-                        <div class="form-text">Your Plex authentication token</div>
+                        <input type="password" class="form-control" id="token" name="token" value="{{ server.token }}">
+                        <div class="form-text" id="tokenHelp">Required for Plex servers</div>
                     </div>
-                    {% else %}
+                    
                     <div class="mb-3">
                         <label for="api_key" class="form-label">API Key</label>
-                        <input type="text" class="form-control" id="api_key" name="api_key" required value="{{ server.api_key }}">
-                        <div class="form-text">Found in {{ server.type|title }} under Settings > General</div>
+                        <input type="password" class="form-control" id="api_key" name="api_key" value="{{ server.api_key }}">
+                        <div class="form-text" id="apiKeyHelp">Required for Jellyfin and Emby servers</div>
                     </div>
-                    {% endif %}
                     
                     <div class="mb-3">
                         <label class="form-label">Path Rewrite Rules</label>
@@ -55,11 +68,9 @@
                         <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
                     </div>
                     
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input type="checkbox" class="form-check-input" id="enabled" name="enabled" value="true" {% if server.enabled %}checked{% endif %}>
-                            <label class="form-check-label" for="enabled">Enabled</label>
-                        </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="enabled" name="enabled" {% if server.enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="enabled">Enabled</label>
                     </div>
                     
                     <div class="d-flex justify-content-between">
@@ -98,23 +109,134 @@
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
 <script>
-// Set the appropriate URL placeholder based on server type
-document.addEventListener('DOMContentLoaded', function() {
-    const serverType = document.getElementById('server_type').value;
-    const urlField = document.getElementById('url');
+function updateAuthFields() {
+    const type = document.getElementById('type').value;
+    const tokenField = document.getElementById('token');
+    const apiKeyField = document.getElementById('api_key');
+    const tokenHelp = document.getElementById('tokenHelp');
+    const apiKeyHelp = document.getElementById('apiKeyHelp');
     
-    if (serverType === 'plex') {
-        urlField.placeholder = 'http://plex:32400';
-    } else if (serverType === 'jellyfin') {
-        urlField.placeholder = 'http://jellyfin:8096';
-    } else if (serverType === 'emby') {
-        urlField.placeholder = 'http://emby:8096';
+    if (type === 'plex') {
+        tokenField.required = true;
+        apiKeyField.required = false;
+        tokenHelp.style.display = 'block';
+        apiKeyHelp.style.display = 'none';
+    } else {
+        tokenField.required = false;
+        apiKeyField.required = true;
+        tokenHelp.style.display = 'none';
+        apiKeyHelp.style.display = 'block';
+    }
+}
+
+async function testConnection() {
+    const url = document.getElementById('url').value;
+    const type = document.getElementById('type').value;
+    const token = document.getElementById('token').value;
+    const apiKey = document.getElementById('api_key').value;
+    const statusDiv = document.getElementById('connectionStatus');
+    
+    if (!url) {
+        statusDiv.innerHTML = '<span class="text-danger">Please fill in the URL</span>';
+        return;
+    }
+    
+    if (type === 'plex' && !token) {
+        statusDiv.innerHTML = '<span class="text-danger">Please fill in the Plex Token</span>';
+        return;
+    }
+    
+    if ((type === 'jellyfin' || type === 'emby') && !apiKey) {
+        statusDiv.innerHTML = '<span class="text-danger">Please fill in the API Key</span>';
+        return;
+    }
+    
+    statusDiv.innerHTML = '<span class="text-warning">Testing connection...</span>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('url', url);
+        if (type === 'plex') {
+            formData.append('token', token);
+        } else {
+            formData.append('api_key', apiKey);
+        }
+        
+        const response = await fetch('/test-connection', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            statusDiv.innerHTML = `<span class="text-success">${result.message}</span>`;
+        } else {
+            statusDiv.innerHTML = `<span class="text-danger">${result.message}</span>`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
+    }
+}
+
+// Add form validation before submission
+document.getElementById('editMediaServerForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const url = document.getElementById('url').value;
+    const type = document.getElementById('type').value;
+    const token = document.getElementById('token').value;
+    const apiKey = document.getElementById('api_key').value;
+    
+    if (!url) {
+        alert('Please fill in the URL');
+        return;
+    }
+    
+    if (type === 'plex' && !token) {
+        alert('Please fill in the Plex Token');
+        return;
+    }
+    
+    if ((type === 'jellyfin' || type === 'emby') && !apiKey) {
+        alert('Please fill in the API Key');
+        return;
+    }
+    
+    // Test connection before submitting
+    const formData = new FormData();
+    formData.append('type', type);
+    formData.append('url', url);
+    if (type === 'plex') {
+        formData.append('token', token);
+    } else {
+        formData.append('api_key', apiKey);
+    }
+    
+    try {
+        const response = await fetch('/test-connection', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            // If connection test succeeds, submit the form
+            this.submit();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert(`Connection test failed: ${error.message}`);
     }
 });
+
+// Initialize auth fields on page load
+document.addEventListener('DOMContentLoaded', updateAuthFields);
 
 document.addEventListener('DOMContentLoaded', function() {
     const rewriteRules = document.getElementById('rewrite_rules');

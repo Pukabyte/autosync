@@ -6,7 +6,7 @@
 <div class="row mb-4">
     <div class="col">
         <h1>Add {{ instance_type|title }} Instance</h1>
-        <p class="lead">Configure a new {{ instance_type|title }} instance for synchronization</p>
+        <p class="lead">Configure a new {{ instance_type|title }} connection</p>
     </div>
 </div>
 
@@ -14,94 +14,98 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-body">
-                <form method="post" action="/instances/add">
-                    <input type="hidden" name="type" value="{{ instance_type }}" id="instance_type">
-                    
+                <form id="addInstanceForm" hx-post="/instances/add" hx-target="#main-content">
                     <div class="mb-3">
-                        <label for="name" class="form-label">Instance Name</label>
+                        <label for="name" class="form-label">Name</label>
                         <input type="text" class="form-control" id="name" name="name" required>
                         <div class="form-text">A unique name to identify this instance</div>
                     </div>
                     
                     <div class="mb-3">
+                        <label for="type" class="form-label">Type</label>
+                        <select class="form-select" id="type" name="type" required>
+                            <option value="sonarr" {% if instance_type == "sonarr" %}selected{% endif %}>Sonarr</option>
+                            <option value="radarr" {% if instance_type == "radarr" %}selected{% endif %}>Radarr</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
                         <label for="url" class="form-label">URL</label>
-                        <input type="url" class="form-control" id="url" name="url" required placeholder="http://sonarr:8989">
+                        <div class="input-group">
+                            <input type="url" class="form-control" id="url" name="url" required>
+                            <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
+                        </div>
+                        <div id="connectionStatus" class="form-text"></div>
                         <div class="form-text">The full URL to your {{ instance_type|title }} instance</div>
                     </div>
                     
                     <div class="mb-3">
                         <label for="api_key" class="form-label">API Key</label>
-                        <input type="text" class="form-control" id="api_key" name="api_key" required>
+                        <input type="password" class="form-control" id="api_key" name="api_key" required>
                         <div class="form-text">Found in {{ instance_type|title }} under Settings > General</div>
                     </div>
                     
                     <div class="mb-3">
                         <label for="root_folder_path" class="form-label">Root Folder Path</label>
                         <input type="text" class="form-control" id="root_folder_path" name="root_folder_path" required>
-                        <div class="form-text">Path where media will be stored</div>
+                        <div class="form-text">The root folder path where media is stored</div>
                     </div>
                     
                     <div class="mb-3">
                         <label for="quality_profile_id" class="form-label">Quality Profile ID</label>
-                        <input type="number" class="form-control" id="quality_profile_id" name="quality_profile_id" required value="1">
-                        <div class="form-text">ID of the quality profile to use</div>
+                        <input type="number" class="form-control" id="quality_profile_id" name="quality_profile_id" required>
+                        <div class="form-text">The ID of the quality profile to use</div>
                     </div>
+                    
+                    {% if instance_type == "sonarr" %}
+                    <div class="mb-3">
+                        <label for="language_profile_id" class="form-label">Language Profile ID</label>
+                        <input type="number" class="form-control" id="language_profile_id" name="language_profile_id" value="1">
+                        <div class="form-text">The ID of the language profile to use (default: 1)</div>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="season_folder" name="season_folder">
+                        <label class="form-check-label" for="season_folder">Use Season Folders</label>
+                        <div class="form-text">Whether to organize episodes in season folders</div>
+                    </div>
+                    {% endif %}
                     
                     <div class="mb-3">
                         <label class="form-label">Path Rewrite Rules</label>
-                        <div id="rewrite_rules">
-                            <div class="rewrite-rule mb-2">
-                                <div class="input-group">
-                                    <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path">
-                                    <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path">
-                                    <button type="button" class="btn btn-danger remove-rule">Remove</button>
-                                </div>
-                            </div>
-                        </div>
+                        <div id="rewrite_rules"></div>
                         <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
                         <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
                     </div>
                     
-                    {% if instance_type == 'sonarr' %}
-                    <div class="mb-3">
-                        <label for="language_profile_id" class="form-label">Language Profile ID</label>
-                        <input type="number" class="form-control" id="language_profile_id" name="language_profile_id" value="1">
-                        <div class="form-text">The language profile ID to use (Sonarr only)</div>
-                    </div>
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="season_folder" name="season_folder" value="true" checked>
-                        <label class="form-check-label" for="season_folder">Use Season Folders</label>
-                    </div>
-                    {% endif %}
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync" value="true">
-                        <label class="form-check-label" for="search_on_sync">Search on Sync</label>
-                        <div class="form-text">Automatically search for media when added</div>
-                    </div>
-                    
                     <div class="mb-3">
                         <label class="form-label">Enabled Events</label>
-                        <div class="form-text mb-2">Select which events to handle for this instance</div>
-                        
-                        {% if instance_type == 'sonarr' %}
-                            {% for event in ["Grab", "Download", "Rename", "SeriesDelete", "EpisodeFileDelete", "Import"] %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
-                                       {% if event in ["Import", "Download"] %}checked{% endif %}>
-                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            {% for event in ["Grab", "Download", "Rename", "MovieDelete", "MovieFileDelete", "Import"] %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
-                                       {% if event in ["Import", "Download"] %}checked{% endif %}>
-                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
-                            </div>
-                            {% endfor %}
-                        {% endif %}
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="event_grab" name="enabled_events" value="Grab" checked>
+                            <label class="form-check-label" for="event_grab">Grab</label>
+                            <div class="form-text">When a release is grabbed</div>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="event_import" name="enabled_events" value="Import" checked>
+                            <label class="form-check-label" for="event_import">Import</label>
+                            <div class="form-text">When a file is imported</div>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="event_rename" name="enabled_events" value="Rename" checked>
+                            <label class="form-check-label" for="event_rename">Rename</label>
+                            <div class="form-text">When a file is renamed</div>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="event_delete" name="enabled_events" value="{% if instance_type == 'sonarr' %}SeriesDelete{% else %}MovieDelete{% endif %}" checked>
+                            <label class="form-check-label" for="event_delete">Delete</label>
+                            <div class="form-text">When a file is deleted</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync">
+                        <label class="form-check-label" for="search_on_sync">Search on Sync</label>
+                        <div class="form-text">Whether to trigger a search when syncing content</div>
                     </div>
                     
                     <div class="d-flex justify-content-between">
@@ -119,38 +123,126 @@
                 <h5 class="card-title mb-0">Help</h5>
             </div>
             <div class="card-body">
-                <h6>Finding Quality Profile IDs</h6>
+                <h6>Finding Your API Key</h6>
                 <ol class="small">
-                    <li>Open your browser's Developer Tools (F12)</li>
-                    <li>Go to the Network tab</li>
-                    <li>Navigate to Settings -> Profiles in {{ instance_type|title }}</li>
-                    <li>Click on the quality profile you want to use</li>
-                    <li>Look for a network request in Dev Tools</li>
-                    <li>Find the ID number in the response data</li>
+                    <li>Sign in to your {{ instance_type|title }} instance</li>
+                    <li>Go to Settings > General</li>
+                    <li>Look for "API Key" or "Security" section</li>
+                    <li>Copy the API key shown</li>
                 </ol>
                 
-                <h6 class="mt-3">API Key Location</h6>
+                <h6 class="mt-4">Finding Profile IDs</h6>
+                <ol class="small">
+                    <li>Go to Settings > Profiles</li>
+                    <li>For Quality Profiles:
+                        <ul>
+                            <li>Look for the profile you want to use</li>
+                            <li>The ID is shown in the URL when you click on it</li>
+                        </ul>
+                    </li>
+                    {% if instance_type == "sonarr" %}
+                    <li>For Language Profiles:
+                        <ul>
+                            <li>Go to Settings > Language Profiles</li>
+                            <li>Default profile ID is usually 1</li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ol>
+                
+                <h6 class="mt-4">Path Rewrite Rules</h6>
                 <p class="small">
-                    In {{ instance_type|title }}, go to Settings -> General -> Security
-                    to find your API key.
+                    If you're using Docker, you may need to configure path rewriting to match your container's volume mappings.
+                    For example, if your host path is <code>/mnt/plex</code> but inside the container it's <code>/data</code>,
+                    you would add a rewrite rule to convert between these paths.
                 </p>
             </div>
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
 <script>
-// Set the appropriate URL placeholder based on instance type
-document.addEventListener('DOMContentLoaded', function() {
-    const instanceType = document.getElementById('instance_type').value;
-    const urlField = document.getElementById('url');
+async function testConnection() {
+    const url = document.getElementById('url').value;
+    const type = document.getElementById('type').value;
+    const apiKey = document.getElementById('api_key').value;
+    const statusDiv = document.getElementById('connectionStatus');
     
-    if (instanceType === 'sonarr') {
-        urlField.placeholder = 'http://sonarr:8989';
-    } else if (instanceType === 'radarr') {
-        urlField.placeholder = 'http://radarr:7878';
+    if (!url) {
+        statusDiv.innerHTML = '<span class="text-danger">Please fill in the URL</span>';
+        return;
+    }
+    
+    if (!apiKey) {
+        statusDiv.innerHTML = '<span class="text-danger">Please fill in the API Key</span>';
+        return;
+    }
+    
+    statusDiv.innerHTML = '<span class="text-warning">Testing connection...</span>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('url', url);
+        formData.append('api_key', apiKey);
+        
+        const response = await fetch('/test-connection', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            statusDiv.innerHTML = `<span class="text-success">${result.message}</span>`;
+        } else {
+            statusDiv.innerHTML = `<span class="text-danger">${result.message}</span>`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
+    }
+}
+
+// Add form validation before submission
+document.getElementById('addInstanceForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const url = document.getElementById('url').value;
+    const type = document.getElementById('type').value;
+    const apiKey = document.getElementById('api_key').value;
+    
+    if (!url) {
+        alert('Please fill in the URL');
+        return;
+    }
+    
+    if (!apiKey) {
+        alert('Please fill in the API Key');
+        return;
+    }
+    
+    // Test connection before submitting
+    const formData = new FormData();
+    formData.append('type', type);
+    formData.append('url', url);
+    formData.append('api_key', apiKey);
+    
+    try {
+        const response = await fetch('/test-connection', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            // If connection test succeeds, submit the form
+            this.submit();
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert(`Connection test failed: ${error.message}`);
     }
 });
 

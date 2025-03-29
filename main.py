@@ -415,7 +415,9 @@ async def edit_instance(
     language_profile_id: Optional[int] = Form(None),
     season_folder: Optional[bool] = Form(False),
     search_on_sync: Optional[bool] = Form(False),
-    enabled_events: List[str] = Form([])
+    enabled_events: List[str] = Form([]),
+    rewrite_from: Optional[List[str]] = Form([]),
+    rewrite_to: Optional[List[str]] = Form([])
 ):
     """Update an existing instance in the configuration."""
     global sonarr_instances, radarr_instances
@@ -437,6 +439,14 @@ async def edit_instance(
     if type.lower() == "sonarr":
         instance_data["language_profile_id"] = language_profile_id or 1
         instance_data["season_folder"] = season_folder
+    
+    # Add rewrite rules if any
+    if rewrite_from and rewrite_to:
+        instance_data["rewrite"] = [
+            {"from_path": f, "to_path": t}
+            for f, t in zip(rewrite_from, rewrite_to)
+            if f and t  # Only add rules where both from and to are provided
+        ]
     
     # Find and update the instance
     for idx, inst in enumerate(config.get("instances", [])):
@@ -488,7 +498,9 @@ async def edit_media_server(
     url: str = Form(...),
     token: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
-    enabled: Optional[bool] = Form(True)
+    enabled: Optional[bool] = Form(True),
+    rewrite_from: Optional[List[str]] = Form([]),
+    rewrite_to: Optional[List[str]] = Form([])
 ):
     """Update an existing media server in the configuration."""
     config = get_config()
@@ -516,6 +528,14 @@ async def edit_media_server(
                 get_template_context(request, server=server_data, messages=[{"type": "danger", "text": "API key is required"}])
             )
         server_data["api_key"] = api_key
+    
+    # Add rewrite rules if any
+    if rewrite_from and rewrite_to:
+        server_data["rewrite"] = [
+            {"from_path": f, "to_path": t}
+            for f, t in zip(rewrite_from, rewrite_to)
+            if f and t  # Only add rules where both from and to are provided
+        ]
     
     # Find and update the server
     for idx, server in enumerate(config.get("media_servers", [])):

@@ -39,54 +39,56 @@
                     <div class="mb-3">
                         <label for="quality_profile_id" class="form-label">Quality Profile ID</label>
                         <input type="number" class="form-control" id="quality_profile_id" name="quality_profile_id" required value="{{ instance.quality_profile_id }}">
-                        <div class="form-text">The quality profile ID to use (see README for how to find this)</div>
+                        <div class="form-text">ID of the quality profile to use</div>
                     </div>
                     
-                    {% if instance.type == 'sonarr' %}
                     <div class="mb-3">
-                        <label for="language_profile_id" class="form-label">Language Profile ID</label>
-                        <input type="number" class="form-control" id="language_profile_id" name="language_profile_id" value="{{ instance.language_profile_id }}">
-                        <div class="form-text">The language profile ID to use (Sonarr only)</div>
-                    </div>
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="season_folder" name="season_folder" value="true" {% if instance.season_folder %}checked{% endif %}>
-                        <label class="form-check-label" for="season_folder">Use Season Folders</label>
-                    </div>
-                    {% endif %}
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync" value="true" {% if instance.search_on_sync %}checked{% endif %}>
-                        <label class="form-check-label" for="search_on_sync">Search on Sync</label>
-                        <div class="form-text">Automatically search for media when added</div>
+                        <label class="form-label">Path Rewrite Rules</label>
+                        <div id="rewrite_rules">
+                            {% for rule in instance.rewrite or [] %}
+                            <div class="rewrite-rule mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path" value="{{ rule.from_path }}">
+                                    <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path" value="{{ rule.to_path }}">
+                                    <button type="button" class="btn btn-danger remove-rule">Remove</button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
+                        <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
                     </div>
                     
                     <div class="mb-3">
                         <label class="form-label">Enabled Events</label>
-                        <div class="form-text mb-2">Select which events to handle for this instance</div>
-                        
-                        {% if instance.type == 'sonarr' %}
-                            {% for event in ["Grab", "Download", "Rename", "SeriesDelete", "EpisodeFileDelete", "Import"] %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
-                                       {% if event in instance.enabled_events %}checked{% endif %}>
-                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            {% for event in ["Grab", "Download", "Rename", "MovieDelete", "MovieFileDelete", "Import"] %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="enabled_events" value="{{ event }}" id="event_{{ event }}"
-                                       {% if event in instance.enabled_events %}checked{% endif %}>
-                                <label class="form-check-label" for="event_{{ event }}">{{ event }}</label>
-                            </div>
-                            {% endfor %}
-                        {% endif %}
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="enabled_events" value="Grab" {% if "Grab" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label">Grab</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="enabled_events" value="Import" {% if "Import" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label">Import</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="enabled_events" value="Rename" {% if "Rename" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label">Rename</label>
+                        </div>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="enabled_events" value="Delete" {% if "Delete" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label">Delete</label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync" {% if instance.search_on_sync %}checked{% endif %}>
+                            <label class="form-check-label" for="search_on_sync">Search on sync</label>
+                        </div>
                     </div>
                     
                     <div class="d-flex justify-content-between">
                         <a href="/" class="btn btn-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-primary">Update Instance</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
                     </div>
                 </form>
             </div>
@@ -132,6 +134,32 @@ document.addEventListener('DOMContentLoaded', function() {
     } else if (instanceType === 'radarr') {
         urlField.placeholder = 'http://radarr:7878';
     }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const rewriteRules = document.getElementById('rewrite_rules');
+    const addRuleBtn = document.getElementById('add_rewrite_rule');
+
+    // Add new rewrite rule
+    addRuleBtn.addEventListener('click', function() {
+        const ruleDiv = document.createElement('div');
+        ruleDiv.className = 'rewrite-rule mb-2';
+        ruleDiv.innerHTML = `
+            <div class="input-group">
+                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path">
+                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path">
+                <button type="button" class="btn btn-danger remove-rule">Remove</button>
+            </div>
+        `;
+        rewriteRules.appendChild(ruleDiv);
+    });
+
+    // Remove rewrite rule
+    rewriteRules.addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-rule')) {
+            e.target.closest('.rewrite-rule').remove();
+        }
+    });
 });
 </script>
 {% endblock %} 

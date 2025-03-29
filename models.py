@@ -182,6 +182,41 @@ class SonarrSeries(BaseModel):
     seriesType: str = "standard"
 
 
+class PathRewrite(BaseModel):
+    """Model for path rewriting configuration"""
+    from_path: str
+    to_path: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "from_path": "/mnt/plex",
+                "to_path": "/mnt/remote/plex"
+            }
+        }
+
+class MediaServerBase(BaseModel):
+    """Base model for media server configurations"""
+    name: str
+    type: str
+    url: str
+    enabled: bool = True
+    rewrite: Optional[List[PathRewrite]] = []
+
+class PlexServer(MediaServerBase):
+    token: str
+    type: str = "plex"
+
+class JellyfinServer(MediaServerBase):
+    api_key: str
+    type: str = "jellyfin"
+
+class EmbyServer(MediaServerBase):
+    api_key: str
+    type: str = "emby"
+
+MediaServer = Union[PlexServer, JellyfinServer, EmbyServer]
+
 class SonarrInstance(BaseModel):
     """Configuration model for Sonarr instances"""
 
@@ -195,6 +230,7 @@ class SonarrInstance(BaseModel):
     language_profile_id: int = 1
     search_on_sync: bool = False
     enabled_events: List[str] = []
+    rewrite: Optional[List[PathRewrite]] = []
 
     @property
     def is_sonarr(self) -> bool:
@@ -248,6 +284,7 @@ class RadarrInstance(BaseModel):
     quality_profile_id: int = 1
     search_on_sync: bool = False
     enabled_events: List[str] = []
+    rewrite: Optional[List[PathRewrite]] = []
 
     @property
     def is_radarr(self) -> bool:
@@ -303,25 +340,3 @@ class RadarrInstance(BaseModel):
                 if response.status != 201:
                     raise Exception(f"Failed to refresh movie: {await response.text()}")
                 return await response.json()
-
-
-class MediaServerBase(BaseModel):
-    """Base model for media server configurations"""
-    name: str
-    type: str
-    url: str
-    enabled: bool = True
-
-class PlexServer(MediaServerBase):
-    token: str
-    type: str = "plex"
-
-class JellyfinServer(MediaServerBase):
-    api_key: str
-    type: str = "jellyfin"
-
-class EmbyServer(MediaServerBase):
-    api_key: str
-    type: str = "emby"
-
-MediaServer = Union[PlexServer, JellyfinServer, EmbyServer]

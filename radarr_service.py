@@ -1,5 +1,5 @@
 from typing import Any, Dict, List
-from utils import http_get, http_post, get_config, parse_time_string
+from utils import http_get, http_post, get_config, parse_time_string, rewrite_path
 from models import RadarrInstance
 import logging
 import asyncio
@@ -145,121 +145,67 @@ async def handle_radarr_grab(
 
 
 async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
-    """Handle Radarr import webhook with validated instances."""
-    try:
-        # Check event type
-        event_type = payload.get("eventType", "")
-        if event_type not in ["Import", "Download"]:
-            logger.debug(f"Ignoring non-Import event: {event_type}")
-            return {"status": "ignored", "reason": f"Radarr event is {event_type}"}
+    """Handle movie import by syncing across instances and scanning media servers"""
+    movie_id = payload.get("movie", {}).get("tmdbId")
+    path = payload.get("movie", {}).get("folderPath") or payload.get("movie", {}).get("path")
+    
+    results = {
+        "status": "ok",
+        "event": "Import",
+        "imports": [],
+        "scanResults": []
+    }
+    
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Sync import across instances
+    for i, instance in enumerate(instances):
+        try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
+            # Apply path rewriting if configured
+            rewritten_path = rewrite_path(path, instance.rewrite)
+            
+            # Get the movie from the instance
+            movie = await instance.get_movie_by_tmdb_id(movie_id)
+            if movie:
+                # Import movie to instance
+                response = await instance.import_movie(movie_id, rewritten_path)
+                results["imports"].append({
+                    "instance": instance.name,
+                    "status": "success"
+                })
+            else:
+                logger.warning(f"Movie not found in {instance.name}")
+                results["imports"].append({
+                    "instance": instance.name,
+                    "status": "skipped",
+                    "reason": "Movie not found"
+                })
+        except Exception as e:
+            logger.error(f"Failed to import to {instance.name}: {str(e)}")
+            results["imports"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
 
-        # Extract movie data
-        movie_data = payload["movie"]
-        movie_file = payload.get("movieFile", {})
-        tmdb_id = movie_data.get("tmdbId")
-        title = movie_data.get("title", "Unknown")
-        year = movie_data.get("year")
-
-        logger.info(f"Processing Radarr Import: Title=\033[1m{title}\033[0m, TMDB=\033[1m{tmdb_id}\033[0m, Year=\033[1m{year}\033[0m")
-
-        # Get all possible paths from the payload
-        folder_path = movie_data.get("folderPath")
-        movie_path = movie_file.get("path")
-        relative_path = movie_file.get("relativePath")
-
-        if not instances:
-            logger.warning("No Radarr instances provided")
-            return {"status": "error", "reason": "No Radarr instances configured"}
-
-        logger.debug(f"Processing \033[1m{len(instances)}\033[0m Radarr instance(s)")
-
-        # Get sync interval from config
-        config = get_config()
-        sync_interval = parse_time_string(config.get("sync_interval", "0"))
-
-        results = []
-        for i, inst in enumerate(instances):
-            try:
-                # Apply sync interval between instances (but not before the first one)
-                if i > 0 and sync_interval > 0:
-                    logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before next instance")
-                    await asyncio.sleep(sync_interval)
-                
-                logger.info(f"Processing instance \033[1m{inst.name}\033[0m")
-
-                # Check if movie exists
-                existing = get_movie_by_tmdbid(inst.url, inst.api_key, tmdb_id)
-
-                if not existing:
-                    logger.info(f"Adding new movie to \033[1m{inst.name}\033[0m")
-                    # Add movie
-                    added = add_movie(
-                        inst.url,
-                        inst.api_key,
-                        tmdb_id,
-                        title,
-                        year,
-                        inst.root_folder_path,
-                        inst.quality_profile_id,
-                    )
-                    movie_id = added["id"]
-                    results.append({
-                        "instance": inst.name,
-                        "action": "added_movie",
-                        "movieId": movie_id
-                    })
-                else:
-                    movie_id = existing[0]["id"]
-                    logger.debug(f"Movie exists in \033[1m{inst.name}\033[0m (id=\033[1m{movie_id}\033[0m)")
-                    results.append({
-                        "instance": inst.name,
-                        "action": "movie_exists",
-                        "movieId": movie_id
-                    })
-
-            except Exception as e:
-                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: {str(e)}")
-                results.append({"instance": inst.name, "error": str(e)})
-
-        # Initialize scanner with media servers from config
-        media_servers = config.get("media_servers", [])
-        active_servers = [s for s in media_servers if s.get('enabled')]
-        logger.debug(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
-        
+    # Scan media servers if path exists
+    if path:
         # Apply sync interval before media server scanning
-        if sync_interval > 0 and results:
-            logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before scanning media servers")
+        if sync_interval > 0 and results["imports"]:
+            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
-        scanner = MediaServerScanner(media_servers)
-        
-        # Try to scan using the most specific path available
-        scan_path = None
-        if folder_path:  # Use folder path for better Plex library scanning
-            scan_path = folder_path
-        elif movie_path:  # Fallback to file path if folder path not available
-            scan_path = movie_path
-        
-        scan_results = []
-        if scan_path:
-            logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
-            scan_results = await scanner.scan_path(scan_path, is_series=False)
-        else:
-            logger.warning("No valid path available to scan")
-
-        response = {
-            "status": "ok",
-            "movieTitle": title,
-            "tmdbId": tmdb_id,
-            "results": results,
-            "scanResults": scan_results,
-            "scannedPath": scan_path
-        }
-        return response
-
-    except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}")
-        return {"status": "error", "error": str(e)}
+        scanner = MediaServerScanner(config.get("media_servers", []))
+        results["scanResults"] = await scanner.scan_path(path, is_series=False)
+    
+    return results
 
 
 async def process_instances(self, event_type, movie_id=None, path=None, movie_file=None, movie_data=None):

@@ -5,7 +5,7 @@ import yaml
 import logging
 import requests
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 import json
 
 # Add at the top of the file
@@ -161,3 +161,27 @@ def parse_time_string(time_str: str) -> float:
     
     logger.warning(f"Invalid time string format: {time_str}, defaulting to 0")
     return 0
+
+
+def rewrite_path(path: str, rewrite_rules: Optional[List[Dict[str, str]]] = None) -> str:
+    """
+    Rewrite a path using the provided rewrite rules.
+    
+    Args:
+        path: The path to rewrite
+        rewrite_rules: List of dictionaries containing 'from_path' and 'to_path' keys
+        
+    Returns:
+        The rewritten path if a matching rule is found, otherwise the original path
+    """
+    if not rewrite_rules:
+        return path
+        
+    for rule in rewrite_rules:
+        from_path = rule.get('from_path', '')
+        to_path = rule.get('to_path', '')
+        
+        if from_path and to_path and path.startswith(from_path):
+            return path.replace(from_path, to_path, 1)
+            
+    return path

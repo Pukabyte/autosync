@@ -6,21 +6,22 @@ from typing import List, Dict, Any, Optional
 from models import PlexServer, JellyfinServer, EmbyServer
 from urllib.parse import urljoin
 from pathlib import Path
+from utils import rewrite_path
 
 # Create module logger
 logger = logging.getLogger(__name__)
 
 class MediaServerScanner:
-    def __init__(self, servers: List[Dict[str, Any]]):
-        self.servers = []
-        logger.info(f"Initializing MediaServerScanner with \033[1m{len(servers)}\033[0m server(s)")
+    def __init__(self, media_servers: List[Dict[str, Any]]):
+        self.media_servers = media_servers
+        logger.info(f"Initializing MediaServerScanner with \033[1m{len(media_servers)}\033[0m server(s)")
         
-        if not servers:
+        if not media_servers:
             logger.warning("No media servers provided for scanning")
             return
             
         logger.info("Media server details:")
-        for idx, server in enumerate(servers):
+        for idx, server in enumerate(media_servers):
             server_name = server.get('name', 'Unknown')
             server_type = server.get('type', 'Unknown')
             server_enabled = server.get('enabled', True)
@@ -28,7 +29,7 @@ class MediaServerScanner:
             status_color = "\033[32m" if server_enabled else "\033[31m"  # Green for enabled, red for disabled
             status_text = f"{status_color}{'enabled' if server_enabled else 'disabled'}\033[0m"
             
-            prefix = "  └─ " if idx == len(servers) - 1 else "  ├─ "
+            prefix = "  └─ " if idx == len(media_servers) - 1 else "  ├─ "
             logger.info(f"{prefix}\033[1m{server_name}\033[0m ({server_type}): {status_text}")
             
             if server["type"] == "plex":
@@ -39,103 +40,42 @@ class MediaServerScanner:
                 self.servers.append(EmbyServer(**server))
 
     async def scan_path(self, path: str, is_series: bool = False) -> List[Dict[str, Any]]:
-        try:
-            # Get parent folder for both movies and series
-            parent_path = str(Path(path).parent)
-            logger.info(f"Scanning path: \033[1m{path}\033[0m")
-            
-            if is_series:
-                scan_path = path
-                library_type = "Series"
-            else:
-                scan_path = path  # Use exact path for movies
-                library_type = "Movies"
-                await asyncio.sleep(2)
-
-            # Consolidated path details at debug level
-            logger.debug(f"Path details:")
-            logger.debug(f"  ├─ Content type: \033[1m{library_type}\033[0m")
-            logger.debug(f"  ├─ Parent path: \033[1m{parent_path}\033[0m")
-            logger.debug(f"  └─ Absolute path: \033[1m{Path(scan_path).absolute()}\033[0m")
-
-            if not self.servers:
-                logger.error("No media servers configured or all servers are disabled")
-                return [{"status": "error", "error": "No media servers configured"}]
-
-            results = []
-            active_servers = [s for s in self.servers if s.enabled]
-            logger.debug(f"Processing \033[1m{len(active_servers)}\033[0m enabled media servers")
-            
-            if not active_servers:
-                logger.error("All media servers are disabled")
-                return [{"status": "error", "error": "All media servers are disabled"}]
-
-            for server in self.servers:
-                if not server.enabled:
-                    logger.debug(f"Skipping disabled server: \033[1m{server.name}\033[0m")
-                    continue
-                    
-                try:
-                    logger.info(f"Processing \033[1m{server.name}\033[0m ({server.type})")
-                    if server.type == "plex":
-                        result = await self._scan_plex(server, scan_path, library_type)
-                        results.append({
-                            "server": server.name,
-                            "type": server.type,
-                            "status": "success",
-                            "result": result
-                        })
-                    elif server.type == "jellyfin":
-                        result = await self._scan_jellyfin(server, scan_path)
-                        results.append({
-                            "server": server.name,
-                            "type": server.type,
-                            "status": "success",
-                            "result": result
-                        })
-                    elif server.type == "emby":
-                        result = await self._scan_emby(server, scan_path)
-                        results.append({
-                            "server": server.name,
-                            "type": server.type,
-                            "status": "success",
-                            "result": result
-                        })
-                    else:
-                        logger.warning(f"Unknown server type: {server.type}")
-                        continue
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.error(f"Failed to scan \033[1m{server.type}\033[0m target=\033[1m{server.name}\033[0m error=\"\033[1m{error_msg}\033[0m\"")
-                    results.append({
-                        "server": server.name,
-                        "type": server.type,
-                        "status": "error",
-                        "error": error_msg
-                    })
-
-            if not results:
-                logger.error("No scan results were generated. Check server configurations.")
-                return [{"status": "error", "error": "No scan results were generated"}]
+        """Scan a path on all configured media servers."""
+        results = []
+        
+        for server in self.media_servers:
+            if not server.get("enabled", True):
+                continue
                 
-            # Simplified scan results summary
-            logger.info(f"Scan results:")
-            for idx, result in enumerate(results):
-                prefix = "  └─ " if idx == len(results) - 1 else "  ├─ "
-                server_name = result.get('server', 'Unknown')
-                status = result.get('status', 'unknown')
-                status_colored = f"\033[32m{status}\033[0m" if status == "success" else f"\033[31m{status}\033[0m"
-                logger.info(f"{prefix}\033[1m{server_name}\033[0m: {status_colored}")
+            try:
+                # Apply path rewriting if configured
+                rewritten_path = rewrite_path(path, server.get("rewrite"))
                 
-                if result.get('status') != 'success' and 'error' in result:
-                    logger.debug(f"        └─ Error: \033[1m{result['error']}\033[0m")
-            
-            return results
-            
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Unexpected error in scan_path: \033[1m{error_msg}\033[0m")
-            return [{"status": "error", "error": f"Scan path failed: {error_msg}"}]
+                if server["type"].lower() == "plex":
+                    result = await self._scan_plex(server, rewritten_path, is_series)
+                elif server["type"].lower() == "jellyfin":
+                    result = await self._scan_jellyfin(server, rewritten_path, is_series)
+                elif server["type"].lower() == "emby":
+                    result = await self._scan_emby(server, rewritten_path, is_series)
+                else:
+                    result = {"status": "error", "message": f"Unsupported media server type: {server['type']}"}
+                
+                results.append({
+                    "server": server["name"],
+                    "type": server["type"],
+                    **result
+                })
+                
+            except Exception as e:
+                logger.error(f"Failed to scan {server['name']}: {str(e)}")
+                results.append({
+                    "server": server["name"],
+                    "type": server["type"],
+                    "status": "error",
+                    "message": str(e)
+                })
+        
+        return results
 
     async def _scan_plex(self, server: PlexServer, path: str, library_type: str) -> Dict[str, Any]:
         headers = {

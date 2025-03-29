@@ -1,7 +1,7 @@
 import logging
 import time
 import asyncio
-from utils import http_get, http_post, http_put, get_config, parse_time_string
+from utils import http_get, http_post, http_put, get_config, parse_time_string, rewrite_path
 from typing import Dict, Any, List
 from models import (
     SonarrSeries,
@@ -297,132 +297,64 @@ async def handle_sonarr_grab(
 
 
 async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
-    """Handle Sonarr import webhook with validated instances."""
-    try:
-        # Check event type
-        event_type = payload.get("eventType", "")
-        if event_type not in ["Import", "Download"]:
-            logger.debug(f"Ignoring non-Import event: {event_type}")
-            return {"status": "ignored", "reason": f"Sonarr event is {event_type}"}
+    """Handle series import by syncing across instances and scanning media servers"""
+    series_id = payload.get("series", {}).get("tvdbId")
+    path = payload.get("series", {}).get("path")
+    
+    results = {
+        "status": "ok",
+        "event": "Import",
+        "imports": [],
+        "scanResults": []
+    }
+    
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Sync import across instances
+    for i, instance in enumerate(instances):
+        try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
+            # Apply path rewriting if configured
+            rewritten_path = rewrite_path(path, instance.rewrite)
+            
+            # Get the series from the instance
+            series = await instance.get_series_by_tvdb_id(series_id)
+            if series:
+                # Import series to instance
+                response = await instance.import_series(series_id, rewritten_path)
+                results["imports"].append({
+                    "instance": instance.name,
+                    "status": "success"
+                })
+            else:
+                logger.warning(f"Series not found in {instance.name}")
+                results["imports"].append({
+                    "instance": instance.name,
+                    "status": "skipped",
+                    "reason": "Series not found"
+                })
+        except Exception as e:
+            logger.error(f"Failed to import to {instance.name}: {str(e)}")
+            results["imports"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
 
-        webhook_data = WebhookPayload(**payload)
-
-        logger.info(
-            f"Processing Sonarr Import: Title=\033[1m{webhook_data.series.title}\033[0m, TVDB=\033[1m{webhook_data.series.tvdbId}\033[0m, Episodes=\033[1m{[f'S{ep.seasonNumber}E{ep.episodeNumber}' for ep in webhook_data.episodes]}\033[0m"
-        )
-
-        # Get all possible paths from the payload
-        series_path = webhook_data.series.path
-        episode_path = payload.get("episodeFile", {}).get("path")
-
-        if not instances:
-            logger.warning("No Sonarr instances provided")
-            return {"status": "error", "reason": "No Sonarr instances configured"}
-
-        logger.debug(f"Processing \033[1m{len(instances)}\033[0m Sonarr instance(s)")
-
-        # Get sync interval from config
-        config = get_config()
-        sync_interval = parse_time_string(config.get("sync_interval", "0"))
-
-        results = []
-        for i, inst in enumerate(instances):
-            try:
-                # Apply sync interval between instances (but not before the first one)
-                if i > 0 and sync_interval > 0:
-                    logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before next instance")
-                    await asyncio.sleep(sync_interval)
-                
-                logger.info(f"Processing instance \033[1m{inst.name}\033[0m")
-
-                # Check if series exists
-                existing = get_series_by_tvdbid(inst.url, inst.api_key, webhook_data.series.tvdbId)
-
-                if not existing:
-                    logger.info(f"Adding new series to \033[1m{inst.name}\033[0m")
-                    # Create series model for addition
-                    series = SonarrSeries(
-                        tvdbId=webhook_data.series.tvdbId,
-                        title=webhook_data.series.title,
-                        qualityProfileId=inst.quality_profile_id,
-                        seasonFolder=inst.season_folder,
-                        rootFolderPath=inst.root_folder_path,
-                        monitored=True,
-                        seasons=[],
-                        addOptions=SonarrAddSeriesOptions(
-                            ignoreEpisodesWithFiles=True,
-                            monitor=SonarrMonitorTypes.future,
-                            searchForMissingEpisodes=inst.search_on_sync,
-                            searchForCutoffUnmetEpisodes=inst.search_on_sync,
-                        ),
-                    )
-
-                    added = add_series(inst.url, inst.api_key, series)
-                    series_id = added["id"]
-                    
-                    if inst.search_on_sync:
-                        logger.debug(f"Search enabled for new series on \033[1m{inst.name}\033[0m")
-
-                    results.append({
-                        "instance": inst.name,
-                        "action": "added_series",
-                        "seriesId": series_id
-                    })
-                else:
-                    series_id = existing[0]["id"]
-                    logger.debug(f"Series exists in \033[1m{inst.name}\033[0m (id=\033[1m{series_id}\033[0m)")
-                    
-                    # Refresh and rescan the series
-                    refresh_result = refresh_series(inst.url, inst.api_key, series_id)
-                    rescan_result = rescan_series(inst.url, inst.api_key, series_id)
-                    
-                    results.append({
-                        "instance": inst.name,
-                        "action": "series_refreshed_and_rescanned",
-                        "seriesId": series_id
-                    })
-
-            except Exception as e:
-                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: {str(e)}")
-                results.append({"instance": inst.name, "error": str(e)})
-
-        # Initialize scanner with media servers from config
-        media_servers = config.get("media_servers", [])
-        active_servers = [s for s in media_servers if s.get('enabled')]
-        logger.debug(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
-        
+    # Scan media servers if path exists
+    if path:
         # Apply sync interval before media server scanning
-        if sync_interval > 0 and results:
-            logger.debug(f"Waiting \033[1m{sync_interval}\033[0m seconds before scanning media servers")
+        if sync_interval > 0 and results["imports"]:
+            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
-        scanner = MediaServerScanner(media_servers)
-        
-        # Try to scan using the most specific path available
-        scan_path = None
-        if series_path:  # Use series path for better Plex library scanning
-            scan_path = series_path
-        elif episode_path:  # Fallback to episode path if series path not available
-            # For TV shows, scan the season folder (one up from episode)
-            scan_path = str(Path(episode_path).parent)
-        
-        scan_results = []
-        if scan_path:
-            logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
-            scan_results = await scanner.scan_path(scan_path, is_series=True)
-        else:
-            logger.warning("No valid path available to scan")
-
-        response = {
-            "status": "ok",
-            "seriesTitle": webhook_data.series.title,
-            "tvdbId": webhook_data.series.tvdbId,
-            "results": results,
-            "scanResults": scan_results,
-            "scannedPath": scan_path
-        }
-        return response
-
-    except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}")
-        return {"status": "error", "error": str(e)}
+        scanner = MediaServerScanner(config.get("media_servers", []))
+        results["scanResults"] = await scanner.scan_path(path, is_series=True)
+    
+    return results

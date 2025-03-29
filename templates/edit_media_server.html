@@ -31,22 +31,40 @@
                         <div class="form-text">Your Plex authentication token</div>
                     </div>
                     {% else %}
-                    <div class="mb-3" id="api_key_field">
+                    <div class="mb-3">
                         <label for="api_key" class="form-label">API Key</label>
                         <input type="text" class="form-control" id="api_key" name="api_key" required value="{{ server.api_key }}">
-                        <div class="form-text">The API key for your media server</div>
+                        <div class="form-text">Found in {{ server.type|title }} under Settings > General</div>
                     </div>
                     {% endif %}
                     
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="enabled" name="enabled" value="true" {% if server.enabled %}checked{% endif %}>
-                        <label class="form-check-label" for="enabled">Enabled</label>
-                        <div class="form-text">Whether this media server should be active</div>
+                    <div class="mb-3">
+                        <label class="form-label">Path Rewrite Rules</label>
+                        <div id="rewrite_rules">
+                            {% for rule in server.rewrite or [] %}
+                            <div class="rewrite-rule mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path" value="{{ rule.from_path }}">
+                                    <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path" value="{{ rule.to_path }}">
+                                    <button type="button" class="btn btn-danger remove-rule">Remove</button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
+                        <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="enabled" name="enabled" value="true" {% if server.enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="enabled">Enabled</label>
+                        </div>
                     </div>
                     
                     <div class="d-flex justify-content-between">
                         <a href="/" class="btn btn-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-primary">Update Media Server</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
                     </div>
                 </form>
             </div>
@@ -96,6 +114,32 @@ document.addEventListener('DOMContentLoaded', function() {
     } else if (serverType === 'emby') {
         urlField.placeholder = 'http://emby:8096';
     }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const rewriteRules = document.getElementById('rewrite_rules');
+    const addRuleBtn = document.getElementById('add_rewrite_rule');
+
+    // Add new rewrite rule
+    addRuleBtn.addEventListener('click', function() {
+        const ruleDiv = document.createElement('div');
+        ruleDiv.className = 'rewrite-rule mb-2';
+        ruleDiv.innerHTML = `
+            <div class="input-group">
+                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path">
+                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path">
+                <button type="button" class="btn btn-danger remove-rule">Remove</button>
+            </div>
+        `;
+        rewriteRules.appendChild(ruleDiv);
+    });
+
+    // Remove rewrite rule
+    rewriteRules.addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-rule')) {
+            e.target.closest('.rewrite-rule').remove();
+        }
+    });
 });
 </script>
 {% endblock %} 

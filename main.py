@@ -30,7 +30,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.15"
+VERSION = "0.0.17"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ templates = Jinja2Templates(directory="templates")
 
 def get_template_context(request: Request, **kwargs) -> Dict[str, Any]:
     """Create a template context with common variables."""
-    # Use the same protocol as the incoming request
+    # Get the base URL from the request, respecting forwarded protocol
     base_url = str(request.base_url)
     context = {
         "request": request,

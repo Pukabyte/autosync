@@ -140,15 +140,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files with HTTPS configuration
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 # Setup Jinja2 templates
 templates = Jinja2Templates(directory="templates")
 
 def get_template_context(request: Request, **kwargs) -> Dict[str, Any]:
     """Create a template context with common variables."""
-    context = {"request": request, "version": VERSION}
+    # Use the same protocol as the incoming request
+    base_url = str(request.base_url)
+    context = {
+        "request": request,
+        "version": VERSION,
+        "base_url": base_url
+    }
     context.update(kwargs)
     return context
 

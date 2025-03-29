@@ -4,6 +4,93 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+body.dark-mode {
+    background-color: #212529;
+    color: #f8f9fa;
+}
+
+body.dark-mode .card {
+    background-color: #2c3034;
+    border-color: #373b3e;
+}
+
+body.dark-mode .card-header {
+    background-color: #343a40;
+    border-bottom-color: #373b3e;
+}
+
+body.dark-mode .list-group-item {
+    background-color: #2c3034;
+    border-color: #373b3e;
+    color: #f8f9fa;
+}
+
+body.dark-mode .list-group-item:hover {
+    background-color: #343a40;
+}
+
+body.dark-mode .form-control {
+    background-color: #343a40;
+    border-color: #373b3e;
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-control:focus {
+    background-color: #343a40;
+    border-color: #0d6efd;
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-select {
+    background-color: #343a40;
+    border-color: #373b3e;
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-select:focus {
+    background-color: #343a40;
+    border-color: #0d6efd;
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-text {
+    color: #adb5bd;
+}
+
+body.dark-mode .text-muted {
+    color: #adb5bd !important;
+}
+
+body.dark-mode .footer {
+    background-color: #343a40 !important;
+}
+
+body.dark-mode #webhookUrl {
+    background-color: #343a40;
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-check-label {
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-text,
+body.dark-mode .form-text small {
+    color: #adb5bd;
+}
+
+body.dark-mode .form-control::placeholder,
+body.dark-mode .form-select::placeholder {
+    color: #6c757d;
+}
+
+body.dark-mode .input-group-text {
+    background-color: #2c3034;
+    border-color: #373b3e;
+    color: #f8f9fa;
 }
 
 .footer {
@@ -52,6 +139,14 @@ body {
     color: #6c757d;
 }
 
+body.dark-mode .form-text {
+    color: #adb5bd;
+}
+
+body.dark-mode .form-text small {
+    color: #adb5bd;
+}
+
 /* List group item hover */
 .list-group-item {
     transition: background-color 0.2s;
@@ -74,4 +169,36 @@ body {
 #webhookUrl {
     font-family: monospace;
     background-color: #f8f9fa;
+}
+
+body.dark-mode .card-header h5,
+body.dark-mode .card-header .card-title {
+    color: #f8f9fa;
+}
+
+body.dark-mode .card-header.bg-info {
+    background-color: #0dcaf0 !important;
+}
+
+body.dark-mode .card-header.bg-info h5,
+body.dark-mode .card-header.bg-info .card-title {
+    color: #000;
+}
+
+body.dark-mode .card-body h6 {
+    color: #f8f9fa;
+}
+
+body.dark-mode .card-body p,
+body.dark-mode .card-body li {
+    color: #adb5bd;
+}
+
+body.dark-mode h1,
+body.dark-mode .lead {
+    color: #f8f9fa;
+}
+
+body.dark-mode .form-label {
+    color: #f8f9fa;
 } 

@@ -1,6 +1,56 @@
 // Main JavaScript for Autosync frontend
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Dark mode functionality
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    // Check for saved dark mode preference
+    const savedDarkMode = localStorage.getItem('darkMode');
+    if (savedDarkMode === 'true') {
+        document.body.classList.add('dark-mode');
+        darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
+    } else if (savedDarkMode === 'false') {
+        document.body.classList.remove('dark-mode');
+        darkModeToggle.innerHTML = '<i class="bi bi-moon-stars"></i>';
+    } else {
+        // If no preference saved, use system preference
+        if (prefersDarkScheme.matches) {
+            document.body.classList.add('dark-mode');
+            darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
+            localStorage.setItem('darkMode', 'true');
+        } else {
+            document.body.classList.remove('dark-mode');
+            darkModeToggle.innerHTML = '<i class="bi bi-moon-stars"></i>';
+            localStorage.setItem('darkMode', 'false');
+        }
+    }
+    
+    // Handle dark mode toggle
+    darkModeToggle.addEventListener('click', function() {
+        document.body.classList.toggle('dark-mode');
+        if (document.body.classList.contains('dark-mode')) {
+            darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
+            localStorage.setItem('darkMode', 'true');
+        } else {
+            darkModeToggle.innerHTML = '<i class="bi bi-moon-stars"></i>';
+            localStorage.setItem('darkMode', 'false');
+        }
+    });
+    
+    // Listen for system dark mode changes
+    prefersDarkScheme.addEventListener('change', function(e) {
+        if (!localStorage.getItem('darkMode')) {
+            if (e.matches) {
+                document.body.classList.add('dark-mode');
+                darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
+            } else {
+                document.body.classList.remove('dark-mode');
+                darkModeToggle.innerHTML = '<i class="bi bi-moon-stars"></i>';
+            }
+        }
+    });
+
     // Auto-dismiss alerts after 5 seconds
     setTimeout(function() {
         const alerts = document.querySelectorAll('.alert');

@@ -30,7 +30,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.18"
+VERSION = "0.0.19"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -634,26 +634,44 @@ async def test_connection(
 ) -> Dict[str, Any]:
     """Test connection to a Sonarr/Radarr instance or media server."""
     try:
+        # Log the connection attempt
+        logger.info(f"Testing connection to {type} at {url}")
+        
+        # Ensure URL has protocol
+        if not url.startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            logger.info(f"Added http:// protocol to URL: {url}")
+            
         if type.lower() in ["sonarr", "radarr"]:
             # Test Sonarr/Radarr connection
             test_url = f"{url}/api/v3/system/status"
             headers = {"X-Api-Key": api_key}
             
+            logger.info(f"Attempting to connect to {test_url}")
             async with aiohttp.ClientSession() as session:
-                async with session.get(test_url, headers=headers, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return {
-                            "status": "success",
-                            "message": f"Successfully connected to {type}",
-                            "version": data.get("version", "unknown")
-                        }
-                    else:
-                        error_text = await response.text()
-                        return {
-                            "status": "error",
-                            "message": f"Failed to connect to {type}: {error_text}"
-                        }
+                try:
+                    async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            logger.info(f"Successfully connected to {type}")
+                            return {
+                                "status": "success",
+                                "message": f"Successfully connected to {type}",
+                                "version": data.get("version", "unknown")
+                            }
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"Connection failed with status {response.status}: {error_text}")
+                            return {
+                                "status": "error",
+                                "message": f"Failed to connect to {type}: {error_text}"
+                            }
+                except aiohttp.ClientError as e:
+                    logger.error(f"Connection error: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": f"Connection error: {str(e)}"
+                    }
         elif type.lower() in ["plex", "jellyfin", "emby"]:
             # Test media server connection
             if type.lower() == "plex":
@@ -663,25 +681,37 @@ async def test_connection(
                 test_url = f"{url}/Library/SelectableMediaFolders"
                 headers = {"X-MediaBrowser-Token": api_key}
             
+            logger.info(f"Attempting to connect to {test_url}")
             async with aiohttp.ClientSession() as session:
-                async with session.get(test_url, headers=headers, timeout=10) as response:
-                    if response.status == 200:
-                        return {
-                            "status": "success",
-                            "message": f"Successfully connected to {type}"
-                        }
-                    else:
-                        error_text = await response.text()
-                        return {
-                            "status": "error",
-                            "message": f"Failed to connect to {type}: {error_text}"
-                        }
+                try:
+                    async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
+                        if response.status == 200:
+                            logger.info(f"Successfully connected to {type}")
+                            return {
+                                "status": "success",
+                                "message": f"Successfully connected to {type}"
+                            }
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"Connection failed with status {response.status}: {error_text}")
+                            return {
+                                "status": "error",
+                                "message": f"Failed to connect to {type}: {error_text}"
+                            }
+                except aiohttp.ClientError as e:
+                    logger.error(f"Connection error: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": f"Connection error: {str(e)}"
+                    }
         else:
+            logger.error(f"Unsupported type: {type}")
             return {
                 "status": "error",
                 "message": f"Unsupported type: {type}"
             }
     except Exception as e:
+        logger.error(f"Connection test failed: {str(e)}")
         return {
             "status": "error",
             "message": f"Connection test failed: {str(e)}"
@@ -1234,6 +1264,7 @@ if __name__ == "__main__":
             "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
             "uvicorn.error": {"level": "INFO", "propagate": False},
             "uvicorn.access": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "multipart": {"level": "WARNING", "propagate": False},  # Suppress multipart debug logs
         },
     }
     

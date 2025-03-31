@@ -328,6 +328,13 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
             if series:
                 # Import series to instance
                 response = await instance.import_series(series_id, rewritten_path)
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"Search enabled for series on {instance.name} (search_on_sync=True)")
+                    search_series(instance.url, instance.api_key, series_id)
+                    logger.info(f"Triggered search for seriesId={series_id} on {instance.name}")
+                
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "success"

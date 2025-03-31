@@ -33,11 +33,11 @@ class MediaServerScanner:
             logger.info(f"{prefix}\033[1m{server_name}\033[0m ({server_type}): {status_text}")
             
             if server["type"] == "plex":
-                self.servers.append(PlexServer(**server))
+                self.media_servers.append(PlexServer(**server))
             elif server["type"] == "jellyfin":
-                self.servers.append(JellyfinServer(**server))
+                self.media_servers.append(JellyfinServer(**server))
             elif server["type"] == "emby":
-                self.servers.append(EmbyServer(**server))
+                self.media_servers.append(EmbyServer(**server))
 
     async def scan_path(self, path: str, is_series: bool = False) -> List[Dict[str, Any]]:
         """Scan a path on all configured media servers."""

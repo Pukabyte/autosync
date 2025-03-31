@@ -176,6 +176,13 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
             if movie:
                 # Import movie to instance
                 response = await instance.import_movie(movie_id, rewritten_path)
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"Search enabled for movie on {instance.name} (search_on_sync=True)")
+                    search_movie(instance.url, instance.api_key, movie_id)
+                    logger.info(f"Triggered search for movieId={movie_id} on {instance.name}")
+                
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "success"

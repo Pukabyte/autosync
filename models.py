@@ -88,7 +88,7 @@ class WebhookPayload(BaseModel):
 # Sonarr-specific webhook (reusing our existing WebhookPayload)
 class SonarrWebhook(WebhookBase):
     series: SonarrWebhookSeries
-    episodes: List[SonarrWebhookEpisode]
+    episodes: Optional[List[SonarrWebhookEpisode]] = None
     release: Optional[SonarrReleaseInfo] = None
     downloadClient: Optional[str] = None
     downloadClientType: Optional[str] = None

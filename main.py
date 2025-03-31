@@ -21,7 +21,7 @@ from models import (
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 from radarr_service import handle_radarr_grab, handle_radarr_import
-from sonarr_service import handle_sonarr_grab, handle_sonarr_import
+from sonarr_service import handle_sonarr_grab, handle_sonarr_import, handle_sonarr_series_add
 from utils import load_config, get_config, save_config, parse_time_string
 from media_server_service import MediaServerScanner
 import random
@@ -30,7 +30,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.19"
+VERSION = "0.0.20"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -329,12 +329,22 @@ async def add_media_server(
     url: str = Form(...),
     token: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
-    enabled: Optional[bool] = Form(True)
+    enabled: Optional[bool] = Form(True),
+    rewrite_from: Optional[List[str]] = Form([]),
+    rewrite_to: Optional[List[str]] = Form([])
 ):
     """Add a new media server to the configuration."""
     config = get_config()
     
-    # Create media server data
+    # Check if server with same name already exists
+    for server in config.get("media_servers", []):
+        if server.get("name") == name:
+            return templates.TemplateResponse(
+                "add_media_server.html",
+                get_template_context(request, messages=[{"type": "danger", "text": "A server with this name already exists"}])
+            )
+    
+    # Create server data
     server_data = {
         "name": name,
         "type": type,
@@ -358,18 +368,17 @@ async def add_media_server(
             )
         server_data["api_key"] = api_key
     
-    # Check if server with same name already exists
+    # Add rewrite rules if any
+    if rewrite_from and rewrite_to:
+        server_data["rewrite"] = [
+            {"from_path": f, "to_path": t}
+            for f, t in zip(rewrite_from, rewrite_to)
+            if f and t  # Only add rules where both from and to are provided
+        ]
+    
+    # Add server to config
     if "media_servers" not in config:
         config["media_servers"] = []
-        
-    for idx, server in enumerate(config.get("media_servers", [])):
-        if server.get("name") == name:
-            # Replace existing server
-            config["media_servers"][idx] = server_data
-            save_config(config)
-            return RedirectResponse(url="/", status_code=303)
-    
-    # Add new server
     config["media_servers"].append(server_data)
     save_config(config)
     
@@ -635,25 +644,25 @@ async def test_connection(
     """Test connection to a Sonarr/Radarr instance or media server."""
     try:
         # Log the connection attempt
-        logger.info(f"Testing connection to {type} at {url}")
+        logger.debug(f"Testing connection to {type} at {url}")
         
-        # Ensure URL has protocol
+        # Add http:// if not present
         if not url.startswith(('http://', 'https://')):
             url = f"http://{url}"
-            logger.info(f"Added http:// protocol to URL: {url}")
+            logger.debug(f"Added http:// protocol to URL: {url}")
             
         if type.lower() in ["sonarr", "radarr"]:
             # Test Sonarr/Radarr connection
             test_url = f"{url}/api/v3/system/status"
             headers = {"X-Api-Key": api_key}
             
-            logger.info(f"Attempting to connect to {test_url}")
+            logger.debug(f"Attempting to connect to {test_url}")
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
                         if response.status == 200:
                             data = await response.json()
-                            logger.info(f"Successfully connected to {type}")
+                            logger.info(f"Successfully connected to {type} instance")
                             return {
                                 "status": "success",
                                 "message": f"Successfully connected to {type}",
@@ -681,7 +690,7 @@ async def test_connection(
                 test_url = f"{url}/Library/SelectableMediaFolders"
                 headers = {"X-MediaBrowser-Token": api_key}
             
-            logger.info(f"Attempting to connect to {test_url}")
+            logger.debug(f"Attempting to connect to {test_url}")
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
@@ -742,13 +751,17 @@ async def debug_webhook(payload: Dict[str, Any], request: Request) -> Dict[str, 
 
 async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrInstance]):
     """Handle series or episode deletion by syncing across instances and scanning media servers"""
-    series_id = payload.get("series", {}).get("tvdbId")
-    path = payload.get("series", {}).get("path")
+    series_data = payload.get("series", {})
+    series_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    path = series_data.get("path")
     event_type = payload.get("eventType")
     
     results = {
         "status": "ok",
         "event": event_type,
+        "title": title,
+        "tvdbId": series_id,
         "deletions": [],
         "scanResults": []
     }
@@ -757,55 +770,105 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
     config = get_config()
     sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
+    # Log the delete event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr {event_type}: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync deletion across instances
     for i, instance in enumerate(instances):
         try:
             # Apply sync interval between instances (but not before the first one)
             if i > 0 and sync_interval > 0:
-                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
                 await asyncio.sleep(sync_interval)
                 
             if event_type == "SeriesDelete":
                 # Delete series from instance
                 response = await instance.delete_series(series_id)
+                logger.info(f"  ├─ Deleted series from \033[1m{instance.name}\033[0m")
             elif event_type == "EpisodeFileDelete":
                 # Delete episode file from instance
                 episode_id = payload.get("episodeFile", {}).get("id")
                 response = await instance.delete_episode(episode_id)
+                logger.info(f"  ├─ Deleted episode file from \033[1m{instance.name}\033[0m")
             
             results["deletions"].append({
                 "instance": instance.name,
                 "status": "success"
             })
         except Exception as e:
-            logger.error(f"Failed to delete from {instance.name}: {str(e)}")
+            error_msg = str(e)
+            if "message" in error_msg:
+                try:
+                    error_json = json.loads(error_msg)
+                    error_msg = error_json.get("message", error_msg)
+                except:
+                    pass
+            logger.error(f"  ├─ Failed to delete from \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
             results["deletions"].append({
                 "instance": instance.name,
                 "status": "error",
-                "error": str(e)
+                "error": error_msg
             })
+
+    # Log deletion results
+    successful_deletes = len([d for d in results["deletions"] if d["status"] == "success"])
+    failed_deletes = len([d for d in results["deletions"] if d["status"] == "error"])
+    
+    logger.info(f"  ├─ Deletion results:")
+    if successful_deletes > 0:
+        logger.info(f"  │   ├─ Deleted from \033[1m{successful_deletes}\033[0m instance(s)")
+    if failed_deletes > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_deletes}\033[0m instance(s)")
 
     # Scan media servers if path exists
     if path:
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results["deletions"]:
-            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=True)
+        scan_results = await scanner.scan_path(path, is_series=True)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
 
 async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance]):
     """Handle movie or movie file deletion by syncing across instances and scanning media servers"""
-    tmdb_id = payload.get("movie", {}).get("tmdbId")
-    path = payload.get("movie", {}).get("folderPath")
+    movie_data = payload.get("movie", {})
+    movie_id = movie_data.get("tmdbId")
+    title = movie_data.get("title", "Unknown")
+    path = movie_data.get("folderPath") or movie_data.get("path")
     event_type = payload.get("eventType")
     
     results = {
         "status": "ok",
         "event": event_type,
+        "title": title,
+        "tmdbId": movie_id,
         "deletions": [],
         "scanResults": []
     }
@@ -814,43 +877,89 @@ async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrIn
     config = get_config()
     sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
+    # Log the delete event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Radarr {event_type}: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync deletion across instances
     for i, instance in enumerate(instances):
         try:
             # Apply sync interval between instances (but not before the first one)
             if i > 0 and sync_interval > 0:
-                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
                 await asyncio.sleep(sync_interval)
                 
             if event_type == "MovieDelete":
                 # Delete movie from instance
-                response = await instance.delete_movie(tmdb_id)
+                response = await instance.delete_movie(movie_id)
+                logger.info(f"  ├─ Deleted movie from \033[1m{instance.name}\033[0m")
             elif event_type == "MovieFileDelete":
                 # Delete movie file from instance
                 movie_file_id = payload.get("movieFile", {}).get("id")
                 response = await instance.delete_movie_file(movie_file_id)
+                logger.info(f"  ├─ Deleted movie file from \033[1m{instance.name}\033[0m")
             
             results["deletions"].append({
                 "instance": instance.name,
                 "status": "success"
             })
         except Exception as e:
-            logger.error(f"Failed to delete from {instance.name}: {str(e)}")
+            error_msg = str(e)
+            if "message" in error_msg:
+                try:
+                    error_json = json.loads(error_msg)
+                    error_msg = error_json.get("message", error_msg)
+                except:
+                    pass
+            logger.error(f"  ├─ Failed to delete from \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
             results["deletions"].append({
                 "instance": instance.name,
                 "status": "error",
-                "error": str(e)
+                "error": error_msg
             })
+
+    # Log deletion results
+    successful_deletes = len([d for d in results["deletions"] if d["status"] == "success"])
+    failed_deletes = len([d for d in results["deletions"] if d["status"] == "error"])
+    
+    logger.info(f"  ├─ Deletion results:")
+    if successful_deletes > 0:
+        logger.info(f"  │   ├─ Deleted from \033[1m{successful_deletes}\033[0m instance(s)")
+    if failed_deletes > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_deletes}\033[0m instance(s)")
 
     # Scan media servers if path exists
     if path:
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results["deletions"]:
-            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=False)
+        scan_results = await scanner.scan_path(path, is_series=False)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
 
@@ -1018,13 +1127,14 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             if event_type == "Grab":
                 return await handle_sonarr_grab(payload, valid_instances)
             elif event_type == "Import":
-                # Add sync interval to the import handler context
                 result = await handle_sonarr_import(payload, valid_instances)
-                logger.info(f"Import result: {result}")
                 return result
             elif event_type in ["SeriesDelete", "EpisodeFileDelete"]:
                 logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
                 return await handle_sonarr_delete(payload, valid_instances)
+            elif event_type == "SeriesAdd":
+                logger.info(f"Received {event_type} event, syncing series addition across instances")
+                return await handle_sonarr_series_add(payload, valid_instances)
             else:
                 logger.info(f"Unhandled Sonarr event type: {event_type}")
                 return {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
@@ -1115,7 +1225,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 return await handle_radarr_grab(payload, valid_instances)
             elif event_type == "Import":
                 result = await handle_radarr_import(payload, valid_instances)
-                logger.info(f"Import result: {result}")
                 return result
             elif event_type in ["MovieDelete", "MovieFileDelete"]:
                 logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
@@ -1144,98 +1253,359 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
 
 async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance]):
     """Handle series rename by syncing across instances and scanning media servers"""
-    series_id = payload.get("series", {}).get("tvdbId")
-    path = payload.get("series", {}).get("path")
+    series_data = payload.get("series", {})
+    series_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    path = series_data.get("path")
     
     results = {
         "status": "ok",
         "event": "Rename",
+        "title": title,
+        "tvdbId": series_id,
         "renames": [],
         "scanResults": []
     }
     
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Log the rename event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr Rename: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync rename across instances
-    for instance in instances:
+    for i, instance in enumerate(instances):
         try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
             # Get the series from the instance
             series = await instance.get_series_by_tvdb_id(series_id)
             if series:
                 # Trigger series refresh to update filenames
                 response = await instance.refresh_series(series['id'])
+                logger.info(f"  ├─ Refreshed series in \033[1m{instance.name}\033[0m")
                 results["renames"].append({
                     "instance": instance.name,
                     "status": "success"
                 })
             else:
-                logger.warning(f"Series not found in {instance.name}")
+                logger.warning(f"  ├─ Series not found in \033[1m{instance.name}\033[0m")
                 results["renames"].append({
                     "instance": instance.name,
                     "status": "skipped",
                     "reason": "Series not found"
                 })
         except Exception as e:
-            logger.error(f"Failed to rename in {instance.name}: {str(e)}")
+            error_msg = str(e)
+            if "message" in error_msg:
+                try:
+                    error_json = json.loads(error_msg)
+                    error_msg = error_json.get("message", error_msg)
+                except:
+                    pass
+            logger.error(f"  ├─ Failed to rename in \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
             results["renames"].append({
                 "instance": instance.name,
                 "status": "error",
-                "error": str(e)
+                "error": error_msg
             })
+
+    # Log rename results
+    successful_renames = len([r for r in results["renames"] if r["status"] == "success"])
+    skipped_renames = len([r for r in results["renames"] if r["status"] == "skipped"])
+    failed_renames = len([r for r in results["renames"] if r["status"] == "error"])
+    
+    logger.info(f"  ├─ Rename results:")
+    if successful_renames > 0:
+        logger.info(f"  │   ├─ Refreshed in \033[1m{successful_renames}\033[0m instance(s)")
+    if skipped_renames > 0:
+        logger.info(f"  │   ├─ Skipped \033[1m{skipped_renames}\033[0m instance(s)")
+    if failed_renames > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_renames}\033[0m instance(s)")
 
     # Scan media servers if path exists
     if path:
-        config = get_config()
+        # Apply sync interval before media server scanning
+        if sync_interval > 0 and results["renames"]:
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
+            await asyncio.sleep(sync_interval)
+            
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=True)
+        scan_results = await scanner.scan_path(path, is_series=True)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
 
 async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrInstance]):
     """Handle movie rename by syncing across instances and scanning media servers"""
-    movie_id = payload.get("movie", {}).get("tmdbId")
-    path = payload.get("movie", {}).get("folderPath") or payload.get("movie", {}).get("path")
-    event_type = payload.get("eventType")
+    movie_data = payload.get("movie", {})
+    movie_id = movie_data.get("tmdbId")
+    title = movie_data.get("title", "Unknown")
+    path = movie_data.get("folderPath") or movie_data.get("path")
     
     results = {
         "status": "ok",
         "event": "Rename",
+        "title": title,
+        "tmdbId": movie_id,
         "renames": [],
         "scanResults": []
     }
     
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Log the rename event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Radarr Rename: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync rename across instances
-    for instance in instances:
+    for i, instance in enumerate(instances):
         try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
             # Get the movie from the instance
             movie = await instance.get_movie_by_tmdb_id(movie_id)
             if movie:
                 # Trigger movie refresh to update filenames
                 response = await instance.refresh_movie(movie['id'])
+                logger.info(f"  ├─ Refreshed movie in \033[1m{instance.name}\033[0m")
                 results["renames"].append({
                     "instance": instance.name,
                     "status": "success"
                 })
             else:
-                logger.warning(f"Movie not found in {instance.name}")
+                logger.warning(f"  ├─ Movie not found in \033[1m{instance.name}\033[0m")
                 results["renames"].append({
                     "instance": instance.name,
                     "status": "skipped",
                     "reason": "Movie not found"
                 })
         except Exception as e:
-            logger.error(f"Failed to rename in {instance.name}: {str(e)}")
+            error_msg = str(e)
+            if "message" in error_msg:
+                try:
+                    error_json = json.loads(error_msg)
+                    error_msg = error_json.get("message", error_msg)
+                except:
+                    pass
+            logger.error(f"  ├─ Failed to rename in \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
             results["renames"].append({
                 "instance": instance.name,
                 "status": "error",
-                "error": str(e)
+                "error": error_msg
             })
+
+    # Log rename results
+    successful_renames = len([r for r in results["renames"] if r["status"] == "success"])
+    skipped_renames = len([r for r in results["renames"] if r["status"] == "skipped"])
+    failed_renames = len([r for r in results["renames"] if r["status"] == "error"])
+    
+    logger.info(f"  ├─ Rename results:")
+    if successful_renames > 0:
+        logger.info(f"  │   ├─ Refreshed in \033[1m{successful_renames}\033[0m instance(s)")
+    if skipped_renames > 0:
+        logger.info(f"  │   ├─ Skipped \033[1m{skipped_renames}\033[0m instance(s)")
+    if failed_renames > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_renames}\033[0m instance(s)")
 
     # Scan media servers if path exists
     if path:
-        config = get_config()
+        # Apply sync interval before media server scanning
+        if sync_interval > 0 and results["renames"]:
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
+            await asyncio.sleep(sync_interval)
+            
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=False)
+        scan_results = await scanner.scan_path(path, is_series=False)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
+
+@app.get("/api/root-folders")
+async def get_root_folders(type: str, url: str, api_key: str) -> Dict[str, Any]:
+    """Get root folders from a Sonarr/Radarr instance."""
+    try:
+        # Ensure URL has protocol
+        if not url.startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            
+        # Test connection first
+        test_url = f"{url}/api/v3/system/status"
+        headers = {"X-Api-Key": api_key}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status != 200:
+                    return {
+                        "status": "error",
+                        "message": "Failed to connect to instance"
+                    }
+        
+        # Get root folders
+        folders_url = f"{url}/api/v3/rootFolder"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(folders_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status == 200:
+                    folders = await response.json()
+                    return {
+                        "status": "success",
+                        "folders": folders
+                    }
+                else:
+                    error_text = await response.text()
+                    return {
+                        "status": "error",
+                        "message": f"Failed to get root folders: {error_text}"
+                    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }
+
+@app.get("/api/quality-profiles")
+async def get_quality_profiles(type: str, url: str, api_key: str) -> Dict[str, Any]:
+    """Get quality profiles from a Sonarr/Radarr instance."""
+    try:
+        # Ensure URL has protocol
+        if not url.startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            
+        # Test connection first
+        test_url = f"{url}/api/v3/system/status"
+        headers = {"X-Api-Key": api_key}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status != 200:
+                    return {
+                        "status": "error",
+                        "message": "Failed to connect to instance"
+                    }
+        
+        # Get quality profiles
+        profiles_url = f"{url}/api/v3/qualityprofile"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(profiles_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status == 200:
+                    profiles = await response.json()
+                    return {
+                        "status": "success",
+                        "profiles": profiles
+                    }
+                else:
+                    error_text = await response.text()
+                    return {
+                        "status": "error",
+                        "message": f"Failed to get quality profiles: {error_text}"
+                    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }
+
+@app.get("/api/language-profiles")
+async def get_language_profiles(type: str, url: str, api_key: str) -> Dict[str, Any]:
+    """Get language profiles from a Sonarr instance."""
+    try:
+        if type.lower() != "sonarr":
+            return {
+                "status": "error",
+                "message": "Language profiles are only available for Sonarr"
+            }
+            
+        # Ensure URL has protocol
+        if not url.startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            
+        # Test connection first
+        test_url = f"{url}/api/v3/system/status"
+        headers = {"X-Api-Key": api_key}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status != 200:
+                    return {
+                        "status": "error",
+                        "message": "Failed to connect to instance"
+                    }
+        
+        # Get language profiles
+        profiles_url = f"{url}/api/v3/languageprofile"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(profiles_url, headers=headers, timeout=10, ssl=False) as response:
+                if response.status == 200:
+                    profiles = await response.json()
+                    return {
+                        "status": "success",
+                        "profiles": profiles
+                    }
+                else:
+                    error_text = await response.text()
+                    return {
+                        "status": "error",
+                        "message": f"Failed to get language profiles: {error_text}"
+                    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }
 
 # ------------------------------------------------------------------------------
 # Helper Functions

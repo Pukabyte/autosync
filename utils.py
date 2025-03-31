@@ -52,9 +52,14 @@ def save_config(config: Dict[str, Any]) -> bool:
         if "webhook_events" not in config:
             # Add default webhook events if not present
             config["webhook_events"] = {
-                "sonarr": ["Grab", "Download", "Rename", "SeriesDelete", "EpisodeFileDelete", "Import"],
+                "sonarr": ["Grab", "Download", "Rename", "SeriesDelete", "EpisodeFileDelete", "Import", "SeriesAdd"],
                 "radarr": ["Grab", "Download", "Rename", "MovieDelete", "MovieFileDelete", "Import"]
             }
+        else:
+            # Ensure SeriesAdd is in sonarr events if webhook_events exists
+            if "sonarr" in config["webhook_events"] and "SeriesAdd" not in config["webhook_events"]["sonarr"]:
+                config["webhook_events"]["sonarr"].append("SeriesAdd")
+                
         if "sync_delay" not in config:
             config["sync_delay"] = "0"
         if "sync_interval" not in config:
@@ -75,6 +80,11 @@ def save_config(config: Dict[str, Any]) -> bool:
 
 def http_get(url: str, api_key: str) -> Dict[str, Any]:
     """Make a GET request with API key authentication."""
+    # Ensure URL has protocol
+    if not url.startswith(('http://', 'https://')):
+        url = f"http://{url}"
+        logger.debug(f"Added http:// protocol to URL: {url}")
+        
     headers = {"X-Api-Key": api_key}
     
     # Log request (masking api key)
@@ -99,6 +109,11 @@ def http_get(url: str, api_key: str) -> Dict[str, Any]:
 
 def http_post(url: str, api_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Make a POST request with API key authentication and JSON payload."""
+    # Ensure URL has protocol
+    if not url.startswith(('http://', 'https://')):
+        url = f"http://{url}"
+        logger.debug(f"Added http:// protocol to URL: {url}")
+        
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     response = requests.post(url, headers=headers, json=payload)
     response.raise_for_status()
@@ -107,6 +122,11 @@ def http_post(url: str, api_key: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
 def http_put(url: str, api_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Make a PUT request with API key authentication."""
+    # Ensure URL has protocol
+    if not url.startswith(('http://', 'https://')):
+        url = f"http://{url}"
+        logger.debug(f"Added http:// protocol to URL: {url}")
+        
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
 
     # Log request (masking api key)
@@ -169,7 +189,7 @@ def rewrite_path(path: str, rewrite_rules: Optional[List[Dict[str, str]]] = None
     
     Args:
         path: The path to rewrite
-        rewrite_rules: List of dictionaries containing 'from_path' and 'to_path' keys
+        rewrite_rules: List of PathRewrite objects containing from_path and to_path attributes
         
     Returns:
         The rewritten path if a matching rule is found, otherwise the original path
@@ -178,8 +198,8 @@ def rewrite_path(path: str, rewrite_rules: Optional[List[Dict[str, str]]] = None
         return path
         
     for rule in rewrite_rules:
-        from_path = rule.get('from_path', '')
-        to_path = rule.get('to_path', '')
+        from_path = rule.from_path if hasattr(rule, 'from_path') else rule.get('from_path', '')
+        to_path = rule.to_path if hasattr(rule, 'to_path') else rule.get('to_path', '')
         
         if from_path and to_path and path.startswith(from_path):
             return path.replace(from_path, to_path, 1)

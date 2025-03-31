@@ -3,159 +3,447 @@
 {% block title %}Edit {{ instance.type|title }} Instance{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2>Edit {{ instance.type|title }} Instance</h2>
-    
-    <form id="editInstanceForm" hx-post="/instances/edit/{{ instance.name }}/{{ instance.type }}" hx-target="#main-content">
-        <div class="mb-3">
-            <label for="name" class="form-label">Name</label>
-            <input type="text" class="form-control" id="name" name="name" value="{{ instance.name }}" readonly>
+<div class="container mt-4 mb-5">
+    <div class="row">
+        <div class="col-md-8">
+            <h2>Edit {{ instance.type|title }} Instance</h2>
+            
+            <form id="editInstanceForm" method="POST" action="/instances/edit/{{ instance.name }}/{{ instance.type }}" class="mt-4">
+                <div class="mb-3">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" id="name" name="name" value="{{ instance.name }}" readonly>
+                    <div class="form-text">A unique name to identify this instance</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="type" class="form-label">Type</label>
+                    <input type="text" class="form-control" id="type" name="type" value="{{ instance.type }}" readonly>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="url" class="form-label">URL</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="url" name="url" value="{{ instance.url }}" required>
+                        <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
+                    </div>
+                    <div id="connectionStatus" class="form-text"></div>
+                    <div class="form-text">The full URL to your {{ instance.type|title }} instance</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="api_key" class="form-label">API Key</label>
+                    <input type="password" class="form-control" id="api_key" name="api_key" value="{{ instance.api_key }}" required>
+                    <div id="apiKeyStatus" class="form-text"></div>
+                    <div class="form-text">Found in {{ instance.type|title }} under Settings > General</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="root_folder_path" class="form-label">Root Folder</label>
+                    <select class="form-select" id="root_folder_path" name="root_folder_path" required>
+                        <option value="">Select a root folder...</option>
+                    </select>
+                    <div class="form-text">The root folder path where media is stored</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="quality_profile_id" class="form-label">Quality Profile</label>
+                    <select class="form-select" id="quality_profile_id" name="quality_profile_id" required>
+                        <option value="">Select a quality profile...</option>
+                    </select>
+                    <div class="form-text">The quality profile to use for new content</div>
+                </div>
+                
+                {% if instance.type == "sonarr" %}
+                <div class="mb-3" id="seasonFolderSection">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="season_folder" name="season_folder" {% if instance.season_folder %}checked{% endif %}>
+                        <label class="form-check-label" for="season_folder">
+                            Use Season Folders
+                        </label>
+                        <div class="form-text">Whether to organize episodes in season folders (Sonarr only)</div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="search_on_sync" name="search_on_sync" {% if instance.search_on_sync %}checked{% endif %}>
+                        <label class="form-check-label" for="search_on_sync">
+                            Search on Sync
+                        </label>
+                        <div class="form-text">Whether to trigger a search when syncing content</div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Path Rewrite Rules</label>
+                    <div id="rewrite_rules">
+                        {% for rule in instance.rewrite %}
+                        <div class="rewrite-rule mb-2">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path" value="{{ rule.from_path }}">
+                                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path" value="{{ rule.to_path }}">
+                                <button type="button" class="btn btn-danger remove-rule">Remove</button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
+                    <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Enabled Events</label>
+                    <div id="sonarrEvents" {% if instance.type == "radarr" %}style="display: none;"{% endif %}>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="Grab" id="eventGrab" {% if "Grab" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="eventGrab">Grab</label>
+                            <div class="form-text">When a release is grabbed</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="Import" id="eventImport" {% if "Import" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="eventImport">Import</label>
+                            <div class="form-text">When a file is imported</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="SeriesAdd" id="eventSeriesAdd" {% if "SeriesAdd" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="eventSeriesAdd">Series Add</label>
+                            <div class="form-text">When a series is added</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="SeriesDelete" id="eventSeriesDelete" {% if "SeriesDelete" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="eventSeriesDelete">Series Delete</label>
+                            <div class="form-text">When a series is deleted</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="EpisodeFileDelete" id="eventEpisodeFileDelete" {% if "EpisodeFileDelete" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="eventEpisodeFileDelete">Episode File Delete</label>
+                            <div class="form-text">When an episode file is deleted</div>
+                        </div>
+                    </div>
+                    <div id="radarrEvents" {% if instance.type == "sonarr" %}style="display: none;"{% endif %}>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="Grab" id="radarrEventGrab" {% if "Grab" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="radarrEventGrab">Grab</label>
+                            <div class="form-text">When a release is grabbed</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="Import" id="radarrEventImport" {% if "Import" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="radarrEventImport">Import</label>
+                            <div class="form-text">When a file is imported</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="MovieDelete" id="radarrEventMovieDelete" {% if "MovieDelete" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="radarrEventMovieDelete">Movie Delete</label>
+                            <div class="form-text">When a movie is deleted</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="MovieFileDelete" id="radarrEventMovieFileDelete" {% if "MovieFileDelete" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="radarrEventMovieFileDelete">Movie File Delete</label>
+                            <div class="form-text">When a movie file is deleted</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <a href="/" class="btn btn-secondary">Cancel</a>
+            </form>
         </div>
         
-        <div class="mb-3">
-            <label for="type" class="form-label">Type</label>
-            <input type="text" class="form-control" id="type" name="type" value="{{ instance.type }}" readonly>
-        </div>
-        
-        <div class="mb-3">
-            <label for="url" class="form-label">URL</label>
-            <div class="input-group">
-                <input type="url" class="form-control" id="url" name="url" value="{{ instance.url }}" required>
-                <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">Help</h5>
+                </div>
+                <div class="card-body">
+                    <h6>Finding Your API Key</h6>
+                    <ol class="small">
+                        <li>Sign in to your {{ instance.type|title }} instance</li>
+                        <li>Go to Settings > General</li>
+                        <li>Look for "API Key" or "Security" section</li>
+                        <li>Copy the API key shown</li>
+                    </ol>
+                    
+                    <h6 class="mt-4">Finding Your URL</h6>
+                    <ol class="small">
+                        <li>If running locally:
+                            <ul>
+                                <li>Use <code>http://localhost:8989</code> for Sonarr</li>
+                                <li>Use <code>http://localhost:7878</code> for Radarr</li>
+                            </ul>
+                        </li>
+                        <li>If running in Docker:
+                            <ul>
+                                <li>Use the container name (e.g., <code>sonarr</code>)</li>
+                                <li>Or use the container IP address</li>
+                            </ul>
+                        </li>
+                        <li>If using reverse proxy:
+                            <ul>
+                                <li>Use your domain (e.g., <code>https://sonarr.example.com</code>)</li>
+                            </ul>
+                        </li>
+                    </ol>
+                    
+                    <h6 class="mt-4">Path Rewrite Rules</h6>
+                    <p class="small">
+                        If you're using Docker, you may need to configure path rewriting to match your container's volume mappings.
+                        For example, if your host path is <code>/mnt/plex</code> but inside the container it's <code>/data</code>,
+                        you would add a rewrite rule to convert between these paths.
+                    </p>
+                </div>
             </div>
-            <div id="connectionStatus" class="form-text"></div>
         </div>
-        
-        <div class="mb-3">
-            <label for="api_key" class="form-label">API Key</label>
-            <input type="password" class="form-control" id="api_key" name="api_key" value="{{ instance.api_key }}" required>
-        </div>
-        
-        <div class="mb-3">
-            <label for="root_folder_path" class="form-label">Root Folder Path</label>
-            <input type="text" class="form-control" id="root_folder_path" name="root_folder_path" value="{{ instance.root_folder_path }}" required>
-        </div>
-        
-        <div class="mb-3">
-            <label for="quality_profile_id" class="form-label">Quality Profile ID</label>
-            <input type="number" class="form-control" id="quality_profile_id" name="quality_profile_id" value="{{ instance.quality_profile_id }}" required>
-        </div>
-        
-        {% if instance.type == "sonarr" %}
-        <div class="mb-3">
-            <label for="language_profile_id" class="form-label">Language Profile ID</label>
-            <input type="number" class="form-control" id="language_profile_id" name="language_profile_id" value="{{ instance.language_profile_id }}">
-        </div>
-        
-        <div class="mb-3 form-check">
-            <input type="checkbox" class="form-check-input" id="season_folder" name="season_folder" {% if instance.season_folder %}checked{% endif %}>
-            <label class="form-check-label" for="season_folder">Create Season Folders</label>
-        </div>
-        {% endif %}
-        
-        <div class="mb-3 form-check">
-            <input type="checkbox" class="form-check-input" id="search_on_sync" name="search_on_sync" {% if instance.search_on_sync %}checked{% endif %}>
-            <label class="form-check-label" for="search_on_sync">Search on Sync</label>
-        </div>
-        
-        <div class="mb-3">
-            <label class="form-label">Enabled Events</label>
-            <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="event_grab" name="enabled_events" value="Grab" {% if "Grab" in instance.enabled_events %}checked{% endif %}>
-                <label class="form-check-label" for="event_grab">Grab</label>
-            </div>
-            <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="event_import" name="enabled_events" value="Import" {% if "Import" in instance.enabled_events %}checked{% endif %}>
-                <label class="form-check-label" for="event_import">Import</label>
-            </div>
-            <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="event_rename" name="enabled_events" value="Rename" {% if "Rename" in instance.enabled_events %}checked{% endif %}>
-                <label class="form-check-label" for="event_rename">Rename</label>
-            </div>
-            <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="event_delete" name="enabled_events" value="{% if instance.type == 'sonarr' %}SeriesDelete{% else %}MovieDelete{% endif %}" {% if "Delete" in instance.enabled_events %}checked{% endif %}>
-                <label class="form-check-label" for="event_delete">Delete</label>
-            </div>
-        </div>
-        
-        <button type="submit" class="btn btn-primary">Save Changes</button>
-        <a href="/" class="btn btn-secondary">Cancel</a>
-    </form>
+    </div>
 </div>
 
 <script>
-async function testConnection() {
-    const url = document.getElementById('url').value;
-    const apiKey = document.getElementById('api_key').value;
-    const type = document.getElementById('type').value;
-    const statusDiv = document.getElementById('connectionStatus');
+// Define global variables
+let connectionTested = false;
+
+// Define loadInstanceData in global scope
+async function loadInstanceData() {
+    if (!connectionTested) return;
     
-    if (!url || !apiKey) {
-        statusDiv.innerHTML = '<span class="text-danger">Please fill in both URL and API Key</span>';
-        return;
-    }
+    const urlInput = document.getElementById('url');
+    const apiKeyInput = document.getElementById('api_key');
+    const typeSelect = document.getElementById('type');
+    const rootFolderSelect = document.getElementById('root_folder_path');
+    const qualityProfileSelect = document.getElementById('quality_profile_id');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const apiKeyStatus = document.getElementById('apiKeyStatus');
     
-    statusDiv.innerHTML = '<span class="text-warning">Testing connection...</span>';
+    const url = urlInput.value;
+    const apiKey = apiKeyInput.value;
+    const type = typeSelect.value;
     
     try {
-        const formData = new FormData();
-        formData.append('type', type);
-        formData.append('url', url);
-        formData.append('api_key', apiKey);
+        // Load root folders
+        const foldersResponse = await fetch(`/api/root-folders?type=${type}&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`);
+        const foldersData = await foldersResponse.json();
         
-        const response = await fetch('/test-connection', {
-            method: 'POST',
-            body: formData
-        });
+        if (foldersData.status === 'success') {
+            rootFolderSelect.innerHTML = '<option value="">Select a root folder...</option>';
+            foldersData.folders.forEach(folder => {
+                const selected = folder.path === '{{ instance.root_folder_path }}' ? 'selected' : '';
+                rootFolderSelect.innerHTML += `<option value="${folder.path}" ${selected}>${folder.path}</option>`;
+            });
+        }
         
-        const result = await response.json();
+        // Load quality profiles
+        const profilesResponse = await fetch(`/api/quality-profiles?type=${type}&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`);
+        const profilesData = await profilesResponse.json();
         
-        if (result.status === 'success') {
-            statusDiv.innerHTML = `<span class="text-success">${result.message}</span>`;
-        } else {
-            statusDiv.innerHTML = `<span class="text-danger">${result.message}</span>`;
+        if (profilesData.status === 'success') {
+            qualityProfileSelect.innerHTML = '<option value="">Select a quality profile...</option>';
+            profilesData.profiles.forEach(profile => {
+                const selected = profile.id === parseInt('{{ instance.quality_profile_id }}') ? 'selected' : '';
+                qualityProfileSelect.innerHTML += `<option value="${profile.id}" ${selected}>${profile.name}</option>`;
+            });
         }
     } catch (error) {
-        statusDiv.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
+        connectionStatus.innerHTML = `<span class="text-danger">Failed to load instance data: ${error.message}</span>`;
     }
 }
 
-// Add form validation before submission
-document.getElementById('editInstanceForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
+// Define testConnection in global scope
+async function testConnection() {
+    const urlInput = document.getElementById('url');
+    const apiKeyInput = document.getElementById('api_key');
+    const typeSelect = document.getElementById('type');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const apiKeyStatus = document.getElementById('apiKeyStatus');
     
-    const url = document.getElementById('url').value;
-    const apiKey = document.getElementById('api_key').value;
-    const type = document.getElementById('type').value;
+    const url = urlInput.value;
+    const apiKey = apiKeyInput.value;
+    const type = typeSelect.value;
     
-    if (!url || !apiKey) {
-        alert('Please fill in both URL and API Key');
+    if (!url) {
+        connectionStatus.innerHTML = '<span class="text-danger">Please enter a URL</span>';
         return;
     }
     
-    // Test connection before submitting
-    const formData = new FormData();
-    formData.append('type', type);
-    formData.append('url', url);
-    formData.append('api_key', apiKey);
+    // Only check for API key if the field has been interacted with
+    if (!apiKey && apiKeyInput.dataset.interacted === 'true') {
+        apiKeyStatus.innerHTML = '<span class="text-danger">Please enter an API Key</span>';
+        return;
+    }
+    
+    connectionStatus.innerHTML = '<span class="text-warning">Testing connection...</span>';
+    apiKeyStatus.innerHTML = '';
     
     try {
         const response = await fetch('/test-connection', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                type: type,
+                url: url,
+                api_key: apiKey
+            })
         });
         
-        const result = await response.json();
+        const data = await response.json();
         
-        if (result.status === 'success') {
-            // If connection test succeeds, submit the form
-            this.submit();
+        if (data.status === 'success') {
+            connectionTested = true;
+            await loadInstanceData();
+            connectionStatus.innerHTML = '<span class="text-success">Connection successful!</span>';
+            // Change API key input type to password after successful connection
+            apiKeyInput.type = 'password';
         } else {
-            alert(result.message);
+            connectionStatus.innerHTML = `<span class="text-danger">Connection test failed: ${data.message}</span>`;
+            connectionTested = false;
         }
     } catch (error) {
-        alert(`Connection test failed: ${error.message}`);
+        connectionStatus.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
+        connectionTested = false;
     }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('editInstanceForm');
+    const urlInput = document.getElementById('url');
+    const apiKeyInput = document.getElementById('api_key');
+    const rootFolderSelect = document.getElementById('root_folder_path');
+    const qualityProfileSelect = document.getElementById('quality_profile_id');
+    const rewriteRules = document.getElementById('rewrite_rules');
+    const addRuleBtn = document.getElementById('add_rewrite_rule');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const apiKeyStatus = document.getElementById('apiKeyStatus');
+    const testConnectionBtn = document.querySelector('button[type="button"]');
+    
+    // Add event listener for test connection button
+    testConnectionBtn.addEventListener('click', testConnection);
+    
+    // Add new rewrite rule
+    addRuleBtn.addEventListener('click', function() {
+        const ruleDiv = document.createElement('div');
+        ruleDiv.className = 'rewrite-rule mb-2';
+        ruleDiv.innerHTML = `
+            <div class="input-group">
+                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path">
+                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path">
+                <button type="button" class="btn btn-danger remove-rule">Remove</button>
+            </div>
+        `;
+        rewriteRules.appendChild(ruleDiv);
+    });
+
+    // Remove rewrite rule
+    rewriteRules.addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-rule')) {
+            e.target.closest('.rewrite-rule').remove();
+        }
+    });
+    
+    // Add event listeners
+    urlInput.addEventListener('change', () => {
+        if (!urlInput.value) {
+            connectionStatus.innerHTML = '<span class="text-danger">Please enter a URL</span>';
+        } else {
+            connectionStatus.innerHTML = '';
+        }
+    });
+    
+    apiKeyInput.addEventListener('change', () => {
+        apiKeyInput.dataset.interacted = 'true';
+        if (!apiKeyInput.value && apiKeyInput.dataset.interacted === 'true') {
+            apiKeyStatus.innerHTML = '<span class="text-danger">Please enter an API Key</span>';
+        } else {
+            apiKeyStatus.innerHTML = '';
+        }
+    });
+    
+    apiKeyInput.addEventListener('blur', () => {
+        apiKeyInput.dataset.interacted = 'true';
+        if (!apiKeyInput.value && apiKeyInput.dataset.interacted === 'true') {
+            apiKeyStatus.innerHTML = '<span class="text-danger">Please enter an API Key</span>';
+        } else {
+            apiKeyStatus.innerHTML = '';
+        }
+    });
+    
+    // Test connection on page load if URL and API key are present
+    if (urlInput.value && apiKeyInput.value) {
+        testConnection();
+    }
+
+    // Handle form submission
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const url = urlInput.value;
+        const type = document.getElementById('type').value;
+        const apiKey = apiKeyInput.value;
+        const name = document.getElementById('name').value;
+        const rootFolderPath = rootFolderSelect.value;
+        const qualityProfileId = qualityProfileSelect.value;
+        const seasonFolder = document.getElementById('season_folder')?.checked || false;
+        const searchOnSync = document.getElementById('search_on_sync').checked;
+        
+        if (!url || !apiKey || !rootFolderPath || !qualityProfileId) {
+            alert('Please fill in all required fields');
+            return;
+        }
+        
+        // Create form data
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('url', url);
+        formData.append('name', name);
+        formData.append('api_key', apiKey);
+        formData.append('root_folder_path', rootFolderPath);
+        formData.append('quality_profile_id', qualityProfileId);
+        formData.append('season_folder', seasonFolder);
+        formData.append('search_on_sync', searchOnSync);
+        
+        // Add enabled events
+        document.querySelectorAll('input[name="enabled_events"]:checked').forEach(input => {
+            formData.append('enabled_events', input.value);
+        });
+        
+        // Add rewrite rules
+        const rewriteRules = document.querySelectorAll('.rewrite-rule');
+        rewriteRules.forEach((rule, index) => {
+            const fromPath = rule.querySelector('input[name="rewrite_from[]"]').value.trim();
+            const toPath = rule.querySelector('input[name="rewrite_to[]"]').value.trim();
+            if (fromPath && toPath) {
+                formData.append(`rewrite_from`, fromPath);
+                formData.append(`rewrite_to`, toPath);
+            }
+        });
+        
+        try {
+            const response = await fetch('/test-connection', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                // If connection test succeeds, submit the form
+                const submitResponse = await fetch(this.action, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (submitResponse.ok) {
+                    window.location.href = '/';
+                } else {
+                    const errorData = await submitResponse.json();
+                    alert(errorData.message || 'Failed to save changes');
+                }
+            } else {
+                alert(result.message);
+            }
+        } catch (error) {
+            alert(`Connection test failed: ${error.message}`);
+        }
+    });
 });
 </script>
 {% endblock %} 

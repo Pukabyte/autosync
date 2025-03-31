@@ -20,6 +20,11 @@ def get_movie_by_tmdbid(
     GET /api/v3/movie?tmdbId=<tmdb_id>
     Returns an array of movies (possibly empty).
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/movie?tmdbId={tmdb_id}"
     return http_get(url, api_key)
 
@@ -37,6 +42,11 @@ def add_movie(
     POST /api/v3/movie to add a new movie. We'll set monitored=true
     but won't automatically search unless we do it separately.
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/movie"
     payload = {
         "tmdbId": tmdb_id,
@@ -55,103 +65,162 @@ def search_movie(base_url: str, api_key: str, movie_id: int) -> Dict[str, Any]:
     """
     POST /api/v3/command with name=MoviesSearch, movieIds=[<id>]
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/command"
     payload = {"name": "MoviesSearch", "movieIds": [movie_id]}
-    return http_post(url, api_key, payload)
+    try:
+        response = http_post(url, api_key, payload)
+        logger.info(f"Triggered search for movieId={movie_id} in Radarr.")
+        return response
+    except Exception as e:
+        logger.error(f"Failed to trigger search for movieId={movie_id}: {str(e)}")
+        raise
+
+
+def refresh_movie(base_url: str, api_key: str, movie_id: int) -> Dict[str, Any]:
+    """
+    POST /api/v3/command with name=RefreshMovie, movieId=<id>
+    """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
+    url = f"{base_url}/api/v3/command"
+    payload = {"name": "RefreshMovie", "movieId": movie_id}
+    try:
+        response = http_post(url, api_key, payload)
+        logger.info(f"Triggered refresh for movieId={movie_id} in Radarr.")
+        return response
+    except Exception as e:
+        logger.error(f"Failed to trigger refresh for movieId={movie_id}: {str(e)}")
+        raise
+
+
+def rescan_movie(base_url: str, api_key: str, movie_id: int) -> Dict[str, Any]:
+    """
+    POST /api/v3/command with name=RescanMovie, movieId=<id>
+    """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
+    url = f"{base_url}/api/v3/command"
+    payload = {"name": "RescanMovie", "movieId": movie_id}
+    try:
+        response = http_post(url, api_key, payload)
+        logger.info(f"Triggered rescan for movieId={movie_id} in Radarr.")
+        return response
+    except Exception as e:
+        logger.error(f"Failed to trigger rescan for movieId={movie_id}: {str(e)}")
+        raise
 
 
 # ------------------------------------------------------------------------------
 # Handle Radarr "On Grab"
 # ------------------------------------------------------------------------------
-async def handle_radarr_grab(
-    payload: Dict[str, Any], instances: List[RadarrInstance]
-) -> Dict[str, Any]:
-    """Handle Radarr grab webhook with validated instances."""
-    try:
-        # Check event type
-        event_type = payload.get("eventType", "")
-        if event_type != "Grab":
-            logger.debug(f"Ignoring non-Grab event: {event_type}")
-            return {"status": "ignored", "reason": f"Radarr event is {event_type}"}
-
-        # Extract movie data
-        movie_data = payload["movie"]
-        tmdb_id = movie_data.get("tmdbId")
-        title = movie_data.get("title", "Unknown")
-        year = movie_data.get("year")
-
-        logger.info(
-            "Processing Radarr Grab: Title=%s, TMDB=%s, Year=%s", title, tmdb_id, year
-        )
-
-        if not instances:
-            logger.warning("No Radarr instances provided")
-            return {"status": "error", "reason": "No Radarr instances configured"}
-
-        logger.debug(f"Processing {len(instances)} Radarr instances")
-
-        results = []
-        for inst in instances:
-            try:
-                logger.debug(f"Processing Radarr instance: {inst.name}")
-
-                # Check if movie exists
-                existing = get_movie_by_tmdbid(inst.url, inst.api_key, tmdb_id)
-
-                if not existing:
-                    logger.info(f"Movie not found in {inst.name}, adding new movie")
-                    # Add movie
-                    added = add_movie(
-                        inst.url,
-                        inst.api_key,
-                        tmdb_id,
-                        title,
-                        year,
-                        inst.root_folder_path,
-                        inst.quality_profile_id,
-                    )
-                    movie_id = added["id"]
-                    logger.info(f"Added new movie (id={movie_id}) to {inst.name}")
-
-                    # Search if configured
-                    if inst.search_on_sync:
-                        search_movie(inst.url, inst.api_key, movie_id)
-                        logger.info(
-                            f"Triggered search for movieId={movie_id} on {inst.name}"
-                        )
-
-                    results.append({"instance": inst.name, "addedMovieId": movie_id})
-                else:
-                    movie_id = existing[0]["id"]
-                    logger.debug(f"Movie already exists (id=\033[1m{movie_id}\033[0m) on \033[1m{inst.name}\033[0m")
-                    results.append({"instance": inst.name, "existingMovieId": movie_id})
-
-            except Exception as e:
-                logger.error(f"Error processing instance \033[1m{inst.name}\033[0m: \033[1m{str(e)}\033[0m")
-                results.append({"instance": inst.name, "error": str(e)})
-
-        response = {
-            "status": "ok",
-            "radarrTitle": title,
-            "tmdbId": tmdb_id,
-            "results": results,
-        }
-        logger.debug(f"Completed processing with response: \033[1m{response}\033[0m")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error processing webhook: \033[1m{str(e)}\033[0m")
-        return {"status": "error", "error": str(e)}
+async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
+    """Handle movie grab by syncing across instances and scanning media servers"""
+    movie_data = payload.get("movie", {})
+    movie_id = movie_data.get("tmdbId")
+    title = movie_data.get("title", "Unknown")
+    path = movie_data.get("folderPath") or movie_data.get("path")
+    
+    results = {
+        "status": "ok",
+        "event": "Grab",
+        "title": title,
+        "tmdbId": movie_id,
+        "results": []
+    }
+    
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Log the grab event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Radarr Grab: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
+    # Process each instance
+    for instance in instances:
+        try:
+            # Check if movie exists
+            existing_movie = get_movie_by_tmdb_id(instance.url, instance.api_key, movie_id)
+            
+            if existing_movie:
+                logger.debug(f"  ├─ Movie already exists (id={existing_movie['id']}) on \033[1m{instance.name}\033[0m")
+                results["results"].append({
+                    "instance": instance.name,
+                    "existingMovieId": existing_movie["id"]
+                })
+            else:
+                # Add movie to instance
+                logger.info(f"  ├─ Adding movie to \033[1m{instance.name}\033[0m")
+                new_movie = add_movie(
+                    instance.url,
+                    instance.api_key,
+                    movie_id,
+                    instance.root_folder_path,
+                    instance.quality_profile_id
+                )
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"  ├─ Search enabled for new movie on \033[1m{instance.name}\033[0m (search_on_sync=True)")
+                    search_movie(instance.url, instance.api_key, new_movie["id"])
+                    logger.info(f"  ├─ Triggered search for movieId=\033[1m{new_movie['id']}\033[0m on \033[1m{instance.name}\033[0m")
+                
+                results["results"].append({
+                    "instance": instance.name,
+                    "newMovieId": new_movie["id"]
+                })
+                
+        except Exception as e:
+            logger.error(f"  ├─ Failed to process on \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
+            results["results"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
+    
+    # Log final results
+    successful_adds = len([r for r in results["results"] if "newMovieId" in r])
+    existing_movies = len([r for r in results["results"] if "existingMovieId" in r])
+    failed_adds = len([r for r in results["results"] if r.get("status") == "error"])
+    
+    logger.info(f"  └─ Results:")
+    if successful_adds > 0:
+        logger.info(f"      ├─ Added to \033[1m{successful_adds}\033[0m instance(s)")
+    if existing_movies > 0:
+        logger.info(f"      ├─ Already exists in \033[1m{existing_movies}\033[0m instance(s)")
+    if failed_adds > 0:
+        logger.info(f"      └─ Failed on \033[1m{failed_adds}\033[0m instance(s)")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return results
 
 
 async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
     """Handle movie import by syncing across instances and scanning media servers"""
-    movie_id = payload.get("movie", {}).get("tmdbId")
-    path = payload.get("movie", {}).get("folderPath") or payload.get("movie", {}).get("path")
+    movie_data = payload.get("movie", {})
+    movie_id = movie_data.get("tmdbId")
+    title = movie_data.get("title", "Unknown")
+    path = movie_data.get("folderPath") or movie_data.get("path")
     
     results = {
         "status": "ok",
         "event": "Import",
+        "title": title,
+        "tmdbId": movie_id,
         "imports": [],
         "scanResults": []
     }
@@ -160,12 +229,18 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
     config = get_config()
     sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
+    # Log the import event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Radarr import: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync import across instances
     for i, instance in enumerate(instances):
         try:
             # Apply sync interval between instances (but not before the first one)
             if i > 0 and sync_interval > 0:
-                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
                 await asyncio.sleep(sync_interval)
             
             # Apply path rewriting if configured
@@ -179,38 +254,72 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
                 
                 # Trigger search if enabled
                 if instance.search_on_sync:
-                    logger.info(f"Search enabled for movie on {instance.name} (search_on_sync=True)")
+                    logger.info(f"  ├─ Search enabled for movie on \033[1m{instance.name}\033[0m (search_on_sync=True)")
                     search_movie(instance.url, instance.api_key, movie_id)
-                    logger.info(f"Triggered search for movieId={movie_id} on {instance.name}")
+                    logger.info(f"  ├─ Triggered search for movieId=\033[1m{movie_id}\033[0m on \033[1m{instance.name}\033[0m")
                 
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "success"
                 })
             else:
-                logger.warning(f"Movie not found in {instance.name}")
+                logger.warning(f"  ├─ Movie not found in \033[1m{instance.name}\033[0m")
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "skipped",
                     "reason": "Movie not found"
                 })
         except Exception as e:
-            logger.error(f"Failed to import to {instance.name}: {str(e)}")
+            logger.error(f"  ├─ Failed to import to \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
             results["imports"].append({
                 "instance": instance.name,
                 "status": "error",
                 "error": str(e)
             })
 
+    # Log import results
+    successful_imports = len([i for i in results["imports"] if i["status"] == "success"])
+    skipped_imports = len([i for i in results["imports"] if i["status"] == "skipped"])
+    failed_imports = len([i for i in results["imports"] if i["status"] == "error"])
+    
+    logger.info(f"  ├─ Import results:")
+    if successful_imports > 0:
+        logger.info(f"  │   ├─ Imported to \033[1m{successful_imports}\033[0m instance(s)")
+    if skipped_imports > 0:
+        logger.info(f"  │   ├─ Skipped \033[1m{skipped_imports}\033[0m instance(s)")
+    if failed_imports > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_imports}\033[0m instance(s)")
+
     # Scan media servers if path exists
     if path:
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results["imports"]:
-            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=False)
+        scan_results = await scanner.scan_path(path, is_series=False)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
 

@@ -10,6 +10,7 @@ from models import (
     WebhookPayload,
     SonarrMonitorTypes,
     SonarrInstance,
+    Season,
 )
 from media_server_service import MediaServerScanner
 from pathlib import Path
@@ -73,6 +74,11 @@ def search_episodes(
     """
     Trigger a search for specific episodes in Sonarr.
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/command"
     payload = {"name": "EpisodeSearch", "episodeIds": episode_ids}
     try:
@@ -88,11 +94,15 @@ def search_series(base_url: str, api_key: str, series_id: int) -> Dict[str, Any]
     """
     Trigger a search for a specific series in Sonarr.
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/command"
     payload = {"name": "SeriesSearch", "seriesId": series_id}
     try:
         response = http_post(url, api_key, payload)
-        logger.info(f"Triggered search for seriesId={series_id} in Sonarr.")
         return response
     except Exception as e:
         logger.error(f"Failed to trigger search for seriesId={series_id}: {str(e)}")
@@ -103,6 +113,11 @@ def refresh_series(base_url: str, api_key: str, series_id: int) -> Dict[str, Any
     """
     Trigger a refresh for a specific series in Sonarr.
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/command"
     payload = {"name": "RefreshSeries", "seriesId": series_id}
     try:
@@ -118,6 +133,11 @@ def rescan_series(base_url: str, api_key: str, series_id: int) -> Dict[str, Any]
     """
     Trigger a rescan for a specific series in Sonarr.
     """
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/command"
     payload = {"name": "RescanSeries", "seriesId": series_id}
     try:
@@ -129,181 +149,125 @@ def rescan_series(base_url: str, api_key: str, series_id: int) -> Dict[str, Any]
         raise
 
 
-async def handle_sonarr_grab(
-    payload: Dict[str, Any], instances: List[SonarrInstance]
-) -> Dict[str, Any]:
-    """Handle Sonarr grab webhook with validated data."""
-    try:
-        # Validate incoming webhook payload
-        webhook_data = WebhookPayload(**payload)
-
-        if webhook_data.eventType != "Grab":
-            logger.debug(f"Ignoring non-Grab event: {webhook_data.eventType}")
-            return {"status": "ignored", "reason": f"Event is {webhook_data.eventType}"}
-
-        target_season = (
-            webhook_data.episodes[0].seasonNumber if webhook_data.episodes else None
-        )
-        episode_numbers = ", ".join(
-            str(ep.episodeNumber) for ep in webhook_data.episodes
-        )
-
-        logger.info(
-            "Processing Sonarr Grab: Title=%s, TVDB=%s, Season=%s, Episodes=[%s]",
-            webhook_data.series.title,
-            webhook_data.series.tvdbId,
-            target_season,
-            episode_numbers,
-        )
-
-        if not instances:
-            logger.warning("No Sonarr instances provided")
-            return {"status": "error", "reason": "No Sonarr instances configured"}
-
-        logger.debug(f"Processing {len(instances)} Sonarr instances")
-
-        results = []
-        for inst in instances:
-            try:
-                logger.debug(f"Processing Sonarr instance: {inst.name}")
-
-                # Check if series exists
-                existing = get_series_by_tvdbid(
-                    inst.url, inst.api_key, webhook_data.series.tvdbId
+async def handle_sonarr_grab(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
+    """Handle series grab by syncing across instances and scanning media servers"""
+    series_data = payload.get("series", {})
+    series_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    path = series_data.get("path")
+    
+    # Get episode information
+    episodes = payload.get("episodes", [])
+    target_season = episodes[0].get("seasonNumber") if episodes else None
+    episode_numbers = ", ".join(str(ep.get("episodeNumber")) for ep in episodes)
+    
+    results = {
+        "status": "ok",
+        "event": "Grab",
+        "title": title,
+        "tvdbId": series_id,
+        "results": []
+    }
+    
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Log the grab event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr Grab: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
+    if target_season:
+        logger.info(f"  ├─ Season: \033[1m{target_season}\033[0m")
+    if episode_numbers:
+        logger.info(f"  ├─ Episodes: \033[1m[{episode_numbers}]\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
+    # Process each instance
+    for instance in instances:
+        try:
+            # Check if series exists
+            existing = get_series_by_tvdbid(instance.url, instance.api_key, series_id)
+            
+            if not existing:
+                logger.info(f"  ├─ Series not found in \033[1m{instance.name}\033[0m, adding new series")
+                # Create series model for addition
+                series = SonarrSeries(
+                    tvdbId=series_id,
+                    title=title,
+                    qualityProfileId=instance.quality_profile_id,
+                    seasonFolder=instance.season_folder,
+                    rootFolderPath=instance.root_folder_path,
+                    monitored=True,
+                    seasons=[],
+                    addOptions=SonarrAddSeriesOptions(
+                        ignoreEpisodesWithFiles=True,
+                        monitor=SonarrMonitorTypes.future,
+                        searchForMissingEpisodes=instance.search_on_sync,
+                        searchForCutoffUnmetEpisodes=instance.search_on_sync,
+                    ),
                 )
-
-                if not existing:
-                    logger.info(f"Series not found in {inst.name}, adding new series")
-                    # Create series model for addition
-                    series = SonarrSeries(
-                        tvdbId=webhook_data.series.tvdbId,
-                        title=webhook_data.series.title,
-                        qualityProfileId=inst.quality_profile_id,
-                        seasonFolder=inst.season_folder,
-                        rootFolderPath=inst.root_folder_path,
-                        monitored=True,
-                        # seasons=[Season(seasonNumber=target_season, monitored=True)],
-                        seasons=[],
-                        addOptions=SonarrAddSeriesOptions(
-                            ignoreEpisodesWithFiles=True,
-                            monitor=SonarrMonitorTypes.future,
-                            searchForMissingEpisodes=inst.search_on_sync,
-                            searchForCutoffUnmetEpisodes=inst.search_on_sync,
-                        ),
-                    )
-
-                    # Add the series
-                    added = add_series(inst.url, inst.api_key, series)
-                    series_id = added["id"]
-                    logger.info(f"Added new series (id={series_id}) to {inst.name}")
-                    
-                    # Log if search was enabled
-                    if inst.search_on_sync:
-                        logger.info(f"Search enabled for new series on {inst.name} (search_on_sync=True)")
-                    
-                    logger.debug(
-                        "Pausing for 2 seconds after adding series so episodes can be added"
-                    )
-                    time.sleep(2)
-                else:
-                    series_id = existing[0]["id"]
-                    logger.debug(
-                        f"Found existing series (id={series_id}) on {inst.name}"
-                    )
-
-                # Handle episode monitoring
-                if webhook_data.episodes and target_season is not None:
-                    url = f"{inst.url}/api/v3/episode?seriesId={series_id}&seasonNumber={target_season}"
-                    season_eps = http_get(url, inst.api_key)
-                    logger.debug(
-                        f"Retrieved {len(season_eps)} episodes for season {target_season}"
-                    )
-
-                    to_update = []
-                    for grabbed_ep in webhook_data.episodes:
-                        matching_eps = [
-                            ep
-                            for ep in season_eps
-                            if ep["episodeNumber"] == grabbed_ep.episodeNumber
-                        ]
-
-                        if matching_eps:
-                            target_ep = matching_eps[0]
-                            if not target_ep.get("monitored", False):
-                                episode = SonarrEpisode(
-                                    id=target_ep["id"],
-                                    seriesId=series_id,
-                                    seasonNumber=grabbed_ep.seasonNumber,
-                                    episodeNumber=grabbed_ep.episodeNumber,
-                                    title=grabbed_ep.title,
-                                    monitored=True,
-                                    hasFile=target_ep.get("hasFile", False),
-                                    episodeFileId=target_ep.get("episodeFileId", 0),
-                                )
-                                to_update.append(episode)
-                                logger.debug(
-                                    f"Will monitor episode {grabbed_ep.episodeNumber}"
-                                )
-
-                    if to_update:
-                        episodes_to_update = [
-                            ep.model_dump(exclude_none=True) for ep in to_update
-                        ]
-                        updated = update_episodes(
-                            inst.url, inst.api_key, episodes_to_update
-                        )
-                        logger.info(f"Updated {len(updated)} episodes in {inst.name}")
-                        # Search episodes
-                        # time.sleep(0.5)
-                        episode_ids = [ep["id"] for ep in updated]
-                        search_episodes(inst.url, inst.api_key, episode_ids)
-                        logger.info(f"Triggered search for episodes in {inst.name}")
-                        results.append(
-                            {
-                                "instance": inst.name,
-                                "episodesMonitored": len(updated),
-                                "season": target_season,
-                            }
-                        )
-                    else:
-                        logger.debug(f"No episodes need updating in {inst.name}")
-                        results.append(
-                            {
-                                "instance": inst.name,
-                                "episodesMonitored": 0,
-                                "season": target_season,
-                            }
-                        )
-
-            except Exception as e:
-                logger.error(f"Error processing instance {inst.name}: {str(e)}")
-                results.append(
-                    {"instance": inst.name, "error": str(e), "season": target_season}
-                )
-
-        response = {
-            "status": "ok",
-            "sonarrTitle": webhook_data.series.title,
-            "tvdbId": webhook_data.series.tvdbId,
-            "targetSeason": target_season,
-            "results": results,
-        }
-        logger.debug(f"Completed processing with response: {response}")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}")
-        return {"status": "error", "error": str(e)}
+                
+                # Add the series
+                added = add_series(instance.url, instance.api_key, series)
+                series_id = added["id"]
+                logger.info(f"  ├─ Added new series (id=\033[1m{series_id}\033[0m) to \033[1m{instance.name}\033[0m")
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"  ├─ Search enabled for new series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
+                    search_series(instance.url, instance.api_key, series_id)
+                    logger.info(f"  ├─ Triggered search for seriesId=\033[1m{series_id}\033[0m on \033[1m{instance.name}\033[0m")
+                
+                results["results"].append({
+                    "instance": instance.name,
+                    "newSeriesId": series_id
+                })
+            else:
+                logger.debug(f"  ├─ Series already exists in \033[1m{instance.name}\033[0m")
+                results["results"].append({
+                    "instance": instance.name,
+                    "existingSeriesId": existing[0]["id"]
+                })
+                
+        except Exception as e:
+            logger.error(f"  ├─ Failed to process on \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
+            results["results"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
+    
+    # Log final results
+    successful_adds = len([r for r in results["results"] if "newSeriesId" in r])
+    existing_series = len([r for r in results["results"] if "existingSeriesId" in r])
+    failed_adds = len([r for r in results["results"] if r.get("status") == "error"])
+    
+    logger.info(f"  └─ Results:")
+    if successful_adds > 0:
+        logger.info(f"      ├─ Added to \033[1m{successful_adds}\033[0m instance(s)")
+    if existing_series > 0:
+        logger.info(f"      ├─ Already exists in \033[1m{existing_series}\033[0m instance(s)")
+    if failed_adds > 0:
+        logger.info(f"      └─ Failed on \033[1m{failed_adds}\033[0m instance(s)")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return results
 
 
 async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
     """Handle series import by syncing across instances and scanning media servers"""
-    series_id = payload.get("series", {}).get("tvdbId")
-    path = payload.get("series", {}).get("path")
+    series_data = payload.get("series", {})
+    series_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    path = series_data.get("path")
     
     results = {
         "status": "ok",
         "event": "Import",
+        "title": title,
+        "tvdbId": series_id,
         "imports": [],
         "scanResults": []
     }
@@ -312,12 +276,18 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
     config = get_config()
     sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
+    # Log the import event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr import: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
     # Sync import across instances
     for i, instance in enumerate(instances):
         try:
             # Apply sync interval between instances (but not before the first one)
             if i > 0 and sync_interval > 0:
-                logger.info(f"Waiting {sync_interval} seconds before processing next instance")
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
                 await asyncio.sleep(sync_interval)
             
             # Apply path rewriting if configured
@@ -331,37 +301,230 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                 
                 # Trigger search if enabled
                 if instance.search_on_sync:
-                    logger.info(f"Search enabled for series on {instance.name} (search_on_sync=True)")
+                    logger.info(f"  ├─ Search enabled for series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
                     search_series(instance.url, instance.api_key, series_id)
-                    logger.info(f"Triggered search for seriesId={series_id} on {instance.name}")
+                    logger.info(f"  ├─ Triggered search for seriesId=\033[1m{series_id}\033[0m on \033[1m{instance.name}\033[0m")
                 
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "success"
                 })
             else:
-                logger.warning(f"Series not found in {instance.name}")
+                logger.warning(f"  ├─ Series not found in \033[1m{instance.name}\033[0m")
                 results["imports"].append({
                     "instance": instance.name,
                     "status": "skipped",
                     "reason": "Series not found"
                 })
         except Exception as e:
-            logger.error(f"Failed to import to {instance.name}: {str(e)}")
+            logger.error(f"  ├─ Failed to import to \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
             results["imports"].append({
                 "instance": instance.name,
                 "status": "error",
                 "error": str(e)
             })
 
+    # Log import results
+    successful_imports = len([i for i in results["imports"] if i["status"] == "success"])
+    skipped_imports = len([i for i in results["imports"] if i["status"] == "skipped"])
+    failed_imports = len([i for i in results["imports"] if i["status"] == "error"])
+    
+    logger.info(f"  ├─ Import results:")
+    if successful_imports > 0:
+        logger.info(f"  │   ├─ Imported to \033[1m{successful_imports}\033[0m instance(s)")
+    if skipped_imports > 0:
+        logger.info(f"  │   ├─ Skipped \033[1m{skipped_imports}\033[0m instance(s)")
+    if failed_imports > 0:
+        logger.info(f"  │   └─ Failed on \033[1m{failed_imports}\033[0m instance(s)")
+
     # Scan media servers if path exists
     if path:
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results["imports"]:
-            logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        results["scanResults"] = await scanner.scan_path(path, is_series=True)
+        scan_results = await scanner.scan_path(path, is_series=True)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     return results
+
+
+async def handle_sonarr_series_add(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
+    """Handle series addition by syncing across instances."""
+    series_data = payload.get("series", {})
+    tvdb_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    
+    # Get monitored seasons from source series
+    source_seasons = series_data.get("seasons", [])
+    monitored_seasons = [
+        Season(seasonNumber=season.get("seasonNumber"), monitored=season.get("monitored", False))
+        for season in source_seasons
+    ]
+    
+    results = {
+        "status": "ok",
+        "event": "SeriesAdd",
+        "title": title,
+        "tvdbId": tvdb_id,
+        "additions": []
+    }
+    
+    # Get sync interval from config
+    config = get_config()
+    sync_interval = parse_time_string(config.get("sync_interval", "0"))
+    
+    # Log the series add event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr series add: Title=\033[1m{title}\033[0m, TVDB=\033[1m{tvdb_id}\033[0m")
+    logger.info(f"  ├─ Found {len(monitored_seasons)} season(s) to sync")
+    
+    # Sync series addition across instances
+    for i, instance in enumerate(instances):
+        try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
+            # Check if series exists
+            existing = await instance.get_series_by_tvdb_id(tvdb_id)
+            
+            if not existing:
+                logger.info(f"  ├─ Series not found in \033[1m{instance.name}\033[0m, adding new series")
+                # Create series model for addition
+                series = SonarrSeries(
+                    tvdbId=tvdb_id,
+                    title=title,
+                    qualityProfileId=instance.quality_profile_id,
+                    seasonFolder=instance.season_folder,
+                    rootFolderPath=instance.root_folder_path,
+                    monitored=True,
+                    seasons=monitored_seasons,  # Use the monitored seasons from source
+                    addOptions=SonarrAddSeriesOptions(
+                        ignoreEpisodesWithFiles=True,
+                        monitor=SonarrMonitorTypes.future,
+                        searchForMissingEpisodes=instance.search_on_sync,
+                        searchForCutoffUnmetEpisodes=instance.search_on_sync,
+                    ),
+                )
+                
+                # Add the series
+                added = add_series(instance.url, instance.api_key, series)
+                series_id = added["id"]
+                logger.info(f"  ├─ Added new series (id=\033[1m{series_id}\033[0m) to \033[1m{instance.name}\033[0m")
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"  ├─ Search enabled for new series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
+                    search_series(instance.url, instance.api_key, series_id)
+                    logger.info(f"  ├─ Triggered search for seriesId=\033[1m{series_id}\033[0m on \033[1m{instance.name}\033[0m")
+                
+                results["additions"].append({
+                    "instance": instance.name,
+                    "status": "success",
+                    "series_id": series_id
+                })
+            else:
+                logger.debug(f"  ├─ Series already exists in \033[1m{instance.name}\033[0m")
+                results["additions"].append({
+                    "instance": instance.name,
+                    "status": "skipped",
+                    "reason": "Series already exists"
+                })
+                
+        except Exception as e:
+            logger.error(f"  ├─ Failed to add series to \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
+            results["additions"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
+    
+    # Log final results
+    successful_adds = len([a for a in results["additions"] if a["status"] == "success"])
+    skipped_adds = len([a for a in results["additions"] if a["status"] == "skipped"])
+    failed_adds = len([a for a in results["additions"] if a["status"] == "error"])
+    
+    logger.info(f"  └─ Results:")
+    if successful_adds > 0:
+        logger.info(f"      ├─ Added to \033[1m{successful_adds}\033[0m instance(s)")
+    if skipped_adds > 0:
+        logger.info(f"      ├─ Skipped \033[1m{skipped_adds}\033[0m instance(s)")
+    if failed_adds > 0:
+        logger.info(f"      └─ Failed on \033[1m{failed_adds}\033[0m instance(s)")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return results
+
+
+async def handle_sonarr_webhook(payload: Dict[str, Any], instances: List[SonarrInstance]) -> Dict[str, Any]:
+    """Handle Sonarr webhook with validated data."""
+    try:
+        # Validate incoming webhook payload
+        webhook_data = WebhookPayload(**payload)
+
+        # Map "Download" to "Import" for consistency
+        event_type = webhook_data.eventType
+        if event_type == "Download":
+            event_type = "Import"
+
+        # Get sync timing settings
+        config = get_config()
+        sync_delay = parse_time_string(config.get("sync_delay", "0"))
+        
+        if sync_delay > 0:
+            logger.info(f"Delaying webhook processing for {sync_delay} seconds")
+            await asyncio.sleep(sync_delay)
+
+        # Filter instances that have this event type enabled
+        valid_instances = [
+            inst for inst in instances 
+            if event_type.lower() in [e.lower() for e in inst.enabled_events]
+        ]
+        
+        logger.debug(f"Found {len(valid_instances)} Sonarr instances for event {event_type}")
+        
+        if not valid_instances:
+            logger.info(f"No Sonarr instances configured for event={event_type}")
+            return {"status": "ignored", "reason": f"No instances configured for {event_type}"}
+        
+        if event_type == "Grab":
+            return await handle_sonarr_grab(payload, valid_instances)
+        elif event_type == "Import":
+            return await handle_sonarr_import(payload, valid_instances)
+        elif event_type in ["SeriesDelete", "EpisodeFileDelete"]:
+            logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
+            return await handle_sonarr_delete(payload, valid_instances)
+        elif event_type == "SeriesAdd":
+            logger.info(f"Received {event_type} event, syncing series addition across instances")
+            return await handle_sonarr_series_add(payload, valid_instances)
+        else:
+            logger.info(f"Unhandled Sonarr event type: {event_type}")
+            return {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
+
+    except Exception as e:
+        logger.error(f"Error processing webhook: {str(e)}")
+        return {"status": "error", "error": str(e)}

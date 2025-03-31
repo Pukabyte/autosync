@@ -3,108 +3,107 @@
 {% block title %}Edit Media Server{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col">
-        <h1>Edit Media Server</h1>
-        <p class="lead">Update configuration for {{ server.name }}</p>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-body">
-                <form id="editMediaServerForm" hx-post="/media-servers/edit/{{ server.name }}" hx-target="#main-content">
-                    <div class="mb-3">
-                        <label for="name" class="form-label">Name</label>
-                        <input type="text" class="form-control" id="name" name="name" value="{{ server.name }}" readonly>
+<div class="container mt-4 mb-5">
+    <div class="row">
+        <div class="col-md-8">
+            <h2>Edit Media Server</h2>
+            <p class="lead">Update configuration for {{ server.name }}</p>
+            
+            <form id="editMediaServerForm" method="POST" action="/media-servers/edit/{{ server.name }}" class="mt-4">
+                <div class="mb-3">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" class="form-control" id="name" name="name" value="{{ server.name }}" required>
+                    <div class="form-text">A unique name to identify this media server</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="type" class="form-label">Type</label>
+                    <select class="form-select" id="type" name="type" required onchange="updateAuthFields()">
+                        <option value="plex" {% if server.type == "plex" %}selected{% endif %}>Plex</option>
+                        <option value="jellyfin" {% if server.type == "jellyfin" %}selected{% endif %}>Jellyfin</option>
+                        <option value="emby" {% if server.type == "emby" %}selected{% endif %}>Emby</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="url" class="form-label">URL</label>
+                    <div class="input-group">
+                        <input type="url" class="form-control" id="url" name="url" value="{{ server.url }}" required>
+                        <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
                     </div>
-                    
-                    <div class="mb-3">
-                        <label for="type" class="form-label">Type</label>
-                        <select class="form-select" id="type" name="type" required onchange="updateAuthFields()">
-                            <option value="plex" {% if server.type == "plex" %}selected{% endif %}>Plex</option>
-                            <option value="jellyfin" {% if server.type == "jellyfin" %}selected{% endif %}>Jellyfin</option>
-                            <option value="emby" {% if server.type == "emby" %}selected{% endif %}>Emby</option>
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="url" class="form-label">URL</label>
-                        <div class="input-group">
-                            <input type="url" class="form-control" id="url" name="url" value="{{ server.url }}" required>
-                            <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">Test Connection</button>
-                        </div>
-                        <div id="connectionStatus" class="form-text"></div>
-                        <div class="form-text">The full URL to your media server</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="token" class="form-label">Plex Token</label>
-                        <input type="password" class="form-control" id="token" name="token" value="{{ server.token }}">
-                        <div class="form-text" id="tokenHelp">Required for Plex servers</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="api_key" class="form-label">API Key</label>
-                        <input type="password" class="form-control" id="api_key" name="api_key" value="{{ server.api_key }}">
-                        <div class="form-text" id="apiKeyHelp">Required for Jellyfin and Emby servers</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Path Rewrite Rules</label>
-                        <div id="rewrite_rules">
-                            {% for rule in server.rewrite or [] %}
-                            <div class="rewrite-rule mb-2">
-                                <div class="input-group">
-                                    <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path" value="{{ rule.from_path }}">
-                                    <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path" value="{{ rule.to_path }}">
-                                    <button type="button" class="btn btn-danger remove-rule">Remove</button>
-                                </div>
+                    <div id="connectionStatus" class="form-text"></div>
+                    <div class="form-text">The full URL to your media server</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="auth_key" class="form-label">Authentication Key</label>
+                    <input type="text" class="form-control" id="auth_key" name="auth_key" value="{{ server.token if server.type == 'plex' else server.api_key }}">
+                    <div id="authKeyStatus" class="form-text"></div>
+                    <div class="form-text" id="authKeyHelp">Required for server authentication</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Path Rewrite Rules</label>
+                    <div id="rewrite_rules">
+                        {% for rule in server.rewrite or [] %}
+                        <div class="rewrite-rule mb-2">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path" value="{{ rule.from_path }}">
+                                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path" value="{{ rule.to_path }}">
+                                <button type="button" class="btn btn-danger remove-rule">Remove</button>
                             </div>
-                            {% endfor %}
                         </div>
-                        <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
-                        <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
+                        {% endfor %}
+                        {% if not server.rewrite %}
+                        <div class="rewrite-rule mb-2">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="rewrite_from[]" placeholder="From path">
+                                <input type="text" class="form-control" name="rewrite_to[]" placeholder="To path">
+                                <button type="button" class="btn btn-danger remove-rule">Remove</button>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
-                    
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="enabled" name="enabled" {% if server.enabled %}checked{% endif %}>
-                        <label class="form-check-label" for="enabled">Enabled</label>
-                    </div>
-                    
-                    <div class="d-flex justify-content-between">
-                        <a href="/" class="btn btn-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-primary">Save Changes</button>
-                    </div>
-                </form>
-            </div>
+                    <button type="button" class="btn btn-secondary mt-2" id="add_rewrite_rule">Add Rewrite Rule</button>
+                    <div class="form-text">Configure path rewriting for Docker volume mappings (e.g., /mnt/plex → /data)</div>
+                </div>
+                
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="enabled" name="enabled" {% if server.enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="enabled">Enabled</label>
+                </div>
+                
+                <div class="d-flex justify-content-between">
+                    <a href="/" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
         </div>
-    </div>
-    
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header bg-info text-white">
-                <h5 class="card-title mb-0">Help</h5>
-            </div>
-            <div class="card-body">
-                {% if server.type == 'plex' %}
-                <h6>Finding Your Plex Token</h6>
-                <ol class="small">
-                    <li>Sign in to Plex web app</li>
-                    <li>Open Developer Tools (F12)</li>
-                    <li>Go to the Network tab</li>
-                    <li>Refresh the page</li>
-                    <li>Look for a request with "X-Plex-Token=" in the URL</li>
-                    <li>The token is the value after "X-Plex-Token="</li>
-                </ol>
-                {% else %}
-                <h6>{{ server.type|title }} API Key</h6>
-                <p class="small">
-                    For {{ server.type|title }}, you can find or generate an API key in the 
-                    server dashboard under API Keys or similar settings.
-                </p>
-                {% endif %}
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">Help</h5>
+                </div>
+                <div class="card-body">
+                    {% if server.type == 'plex' %}
+                    <h6>Finding Your Plex Token</h6>
+                    <ol class="small">
+                        <li>Sign in to Plex web app</li>
+                        <li>Open Developer Tools (F12)</li>
+                        <li>Go to the Network tab</li>
+                        <li>Refresh the page</li>
+                        <li>Look for a request with "X-Plex-Token=" in the URL</li>
+                        <li>The token is the value after "X-Plex-Token="</li>
+                    </ol>
+                    {% else %}
+                    <h6>{{ server.type|title }} API Key</h6>
+                    <p class="small">
+                        For {{ server.type|title }}, you can find or generate an API key in the 
+                        server dashboard under API Keys or similar settings.
+                    </p>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
@@ -113,56 +112,49 @@
 <script>
 function updateAuthFields() {
     const type = document.getElementById('type').value;
-    const tokenField = document.getElementById('token');
-    const apiKeyField = document.getElementById('api_key');
-    const tokenHelp = document.getElementById('tokenHelp');
-    const apiKeyHelp = document.getElementById('apiKeyHelp');
+    const authField = document.getElementById('auth_key');
+    const authLabel = document.querySelector('label[for="auth_key"]');
+    const authHelp = document.getElementById('authKeyHelp');
     
     if (type === 'plex') {
-        tokenField.required = true;
-        apiKeyField.required = false;
-        tokenHelp.style.display = 'block';
-        apiKeyHelp.style.display = 'none';
+        authField.required = true;
+        authLabel.textContent = 'Plex Token';
+        authHelp.textContent = 'Required for Plex servers';
     } else {
-        tokenField.required = false;
-        apiKeyField.required = true;
-        tokenHelp.style.display = 'none';
-        apiKeyHelp.style.display = 'block';
+        authField.required = true;
+        authLabel.textContent = 'API Key';
+        authHelp.textContent = 'Required for Jellyfin and Emby servers';
     }
 }
 
 async function testConnection() {
     const url = document.getElementById('url').value;
     const type = document.getElementById('type').value;
-    const token = document.getElementById('token').value;
-    const apiKey = document.getElementById('api_key').value;
+    const authKey = document.getElementById('auth_key').value;
     const statusDiv = document.getElementById('connectionStatus');
+    const authKeyStatus = document.getElementById('authKeyStatus');
     
     if (!url) {
-        statusDiv.innerHTML = '<span class="text-danger">Please fill in the URL</span>';
+        statusDiv.innerHTML = '<span class="text-danger">Please enter a URL</span>';
         return;
     }
     
-    if (type === 'plex' && !token) {
-        statusDiv.innerHTML = '<span class="text-danger">Please fill in the Plex Token</span>';
-        return;
-    }
-    
-    if ((type === 'jellyfin' || type === 'emby') && !apiKey) {
-        statusDiv.innerHTML = '<span class="text-danger">Please fill in the API Key</span>';
+    if (!authKey && document.getElementById('auth_key').dataset.interacted === 'true') {
+        authKeyStatus.innerHTML = `<span class="text-danger">Please enter a ${type === 'plex' ? 'Plex Token' : 'API Key'}</span>`;
         return;
     }
     
     statusDiv.innerHTML = '<span class="text-warning">Testing connection...</span>';
+    authKeyStatus.innerHTML = '';
     
     try {
         const formData = new FormData();
         formData.append('type', type);
         formData.append('url', url);
         if (type === 'plex') {
-            formData.append('token', token);
+            formData.append('token', authKey);
         } else {
-            formData.append('api_key', apiKey);
+            formData.append('api_key', authKey);
         }
         
         const response = await fetch('/test-connection', {
@@ -173,74 +165,49 @@ async function testConnection() {
         const result = await response.json();
         
         if (result.status === 'success') {
-            statusDiv.innerHTML = `<span class="text-success">${result.message}</span>`;
-        } else {
-            statusDiv.innerHTML = `<span class="text-danger">${result.message}</span>`;
-        }
-    } catch (error) {
-        statusDiv.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
-    }
-}
-
-// Add form validation before submission
-document.getElementById('editMediaServerForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const url = document.getElementById('url').value;
-    const type = document.getElementById('type').value;
-    const token = document.getElementById('token').value;
-    const apiKey = document.getElementById('api_key').value;
-    
-    if (!url) {
-        alert('Please fill in the URL');
-        return;
-    }
-    
-    if (type === 'plex' && !token) {
-        alert('Please fill in the Plex Token');
-        return;
-    }
-    
-    if ((type === 'jellyfin' || type === 'emby') && !apiKey) {
-        alert('Please fill in the API Key');
-        return;
-    }
-    
-    // Test connection before submitting
-    const formData = new FormData();
-    formData.append('type', type);
-    formData.append('url', url);
-    if (type === 'plex') {
-        formData.append('token', token);
-    } else {
-        formData.append('api_key', apiKey);
-    }
-    
-    try {
-        const response = await fetch('/test-connection', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            // If connection test succeeds, submit the form
-            this.submit();
+            statusDiv.innerHTML = `<span class="text-success">${result.message}</span>`
         } else {
             alert(result.message);
         }
     } catch (error) {
         alert(`Connection test failed: ${error.message}`);
     }
-});
-
-// Initialize auth fields on page load
-document.addEventListener('DOMContentLoaded', updateAuthFields);
+}
 
 document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('editMediaServerForm');
+    const urlInput = document.getElementById('url');
+    const authKeyInput = document.getElementById('auth_key');
+    const typeSelect = document.getElementById('type');
     const rewriteRules = document.getElementById('rewrite_rules');
     const addRuleBtn = document.getElementById('add_rewrite_rule');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const authKeyStatus = document.getElementById('authKeyStatus');
+    
+    updateAuthFields();
+    
+    // Add event listeners for auth key field
+    authKeyInput.addEventListener('change', () => {
+        authKeyInput.dataset.interacted = 'true';
+        if (!authKeyInput.value && authKeyInput.dataset.interacted === 'true') {
+            const type = typeSelect.value;
+            document.getElementById('authKeyStatus').innerHTML = 
+                `<span class="text-danger">Please enter a ${type === 'plex' ? 'Plex Token' : 'API Key'}</span>`;
+        } else {
+            document.getElementById('authKeyStatus').innerHTML = '';
+        }
+    });
+    
+    authKeyInput.addEventListener('blur', () => {
+        authKeyInput.dataset.interacted = 'true';
+        if (!authKeyInput.value && authKeyInput.dataset.interacted === 'true') {
+            const type = typeSelect.value;
+            document.getElementById('authKeyStatus').innerHTML = 
+                `<span class="text-danger">Please enter a ${type === 'plex' ? 'Plex Token' : 'API Key'}</span>`;
+        } else {
+            document.getElementById('authKeyStatus').innerHTML = '';
+        }
+    });
 
     // Add new rewrite rule
     addRuleBtn.addEventListener('click', function() {
@@ -262,6 +229,78 @@ document.addEventListener('DOMContentLoaded', function() {
             e.target.closest('.rewrite-rule').remove();
         }
     });
+
+    // Handle form submission
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const url = urlInput.value;
+        const type = typeSelect.value;
+        const authKey = authKeyInput.value;
+        const enabled = document.getElementById('enabled').checked;
+        
+        if (!url) {
+            alert('Please fill in the URL');
+            return;
+        }
+        
+        if (!authKey) {
+            alert(`Please fill in the ${type === 'plex' ? 'Plex Token' : 'API Key'}`);
+            return;
+        }
+        
+        // Create form data
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('url', url);
+        formData.append('enabled', enabled);
+        
+        // Add rewrite rules
+        const rewriteRules = document.querySelectorAll('.rewrite-rule');
+        rewriteRules.forEach((rule, index) => {
+            const fromPath = rule.querySelector('input[name="rewrite_from[]"]').value.trim();
+            const toPath = rule.querySelector('input[name="rewrite_to[]"]').value.trim();
+            if (fromPath && toPath) {
+                formData.append(`rewrite_from`, fromPath);
+                formData.append(`rewrite_to`, toPath);
+            }
+        });
+        
+        if (type === 'plex') {
+            formData.append('token', authKey);
+        } else {
+            formData.append('api_key', authKey);
+        }
+        
+        try {
+            // First test the connection
+            const testResponse = await fetch('/test-connection', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const testResult = await testResponse.json();
+            
+            if (testResult.status === 'success') {
+                // If connection test succeeds, submit the form
+                const submitResponse = await fetch(this.action, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (submitResponse.ok) {
+                    window.location.href = '/';
+                } else {
+                    const errorData = await submitResponse.json();
+                    alert(errorData.message || 'Failed to update server');
+                }
+            } else {
+                alert(testResult.message);
+            }
+        } catch (error) {
+            alert(`Connection test failed: ${error.message}`);
+        }
+    });
 });
 </script>
-{% endblock %} 
+{% endblock %}

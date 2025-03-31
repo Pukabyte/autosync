@@ -12,6 +12,7 @@ webhook_events:
     - "Download"
     - "Rename"
     - "SeriesDelete"
+    - "SeriesAdd"
     - "EpisodeFileDelete"
     - "Import"
   radarr:
@@ -30,6 +31,10 @@ media_servers:
     url: "http://plex:32400"
     token: "api_key"
     enabled: true
+    # Optional: Rewrite rules for media server
+    #rewrite:
+    #  - from_path: /mnt/plex
+    #    to_path: /mnt/remote/plex
 
   - name: "jellyfin"
     type: "jellyfin"
@@ -87,3 +92,7 @@ instances:
     search_on_sync: false
     enabled_events:
       - "Import"
+    # Optional: Rewrite rules for instance
+    #rewrite:
+    #  - from_path: "/mnt/plex/Movies - Remux"
+    #    to_path: "/mnt/remote/plex/Movies - Remux"

@@ -13,64 +13,68 @@ logger = logging.getLogger(__name__)
 
 class MediaServerScanner:
     def __init__(self, media_servers: List[Dict[str, Any]]):
-        self.media_servers = media_servers
+        self.media_servers = []
         logger.info(f"Initializing MediaServerScanner with \033[1m{len(media_servers)}\033[0m server(s)")
         
         if not media_servers:
             logger.warning("No media servers provided for scanning")
             return
             
+        # First log all server details
         logger.info("Media server details:")
-        for idx, server in enumerate(media_servers):
-            server_name = server.get('name', 'Unknown')
-            server_type = server.get('type', 'Unknown')
-            server_enabled = server.get('enabled', True)
+        for idx, server_data in enumerate(media_servers):
+            server_name = server_data.get('name', 'Unknown')
+            server_type = server_data.get('type', 'Unknown')
+            server_enabled = server_data.get('enabled', True)
             
             status_color = "\033[32m" if server_enabled else "\033[31m"  # Green for enabled, red for disabled
             status_text = f"{status_color}{'enabled' if server_enabled else 'disabled'}\033[0m"
             
             prefix = "  └─ " if idx == len(media_servers) - 1 else "  ├─ "
             logger.info(f"{prefix}\033[1m{server_name}\033[0m ({server_type}): {status_text}")
-            
-            if server["type"] == "plex":
-                self.media_servers.append(PlexServer(**server))
-            elif server["type"] == "jellyfin":
-                self.media_servers.append(JellyfinServer(**server))
-            elif server["type"] == "emby":
-                self.media_servers.append(EmbyServer(**server))
+        
+        # Then initialize server objects
+        for server_data in media_servers:
+            if server_data.get('enabled', True):  # Only add enabled servers
+                server_type = server_data.get('type', '').lower()
+                if server_type == "plex":
+                    self.media_servers.append(PlexServer(**server_data))
+                elif server_type == "jellyfin":
+                    self.media_servers.append(JellyfinServer(**server_data))
+                elif server_type == "emby":
+                    self.media_servers.append(EmbyServer(**server_data))
 
     async def scan_path(self, path: str, is_series: bool = False) -> List[Dict[str, Any]]:
         """Scan a path on all configured media servers."""
         results = []
         
         for server in self.media_servers:
-            if not server.get("enabled", True):
-                continue
-                
             try:
                 # Apply path rewriting if configured
-                rewritten_path = rewrite_path(path, server.get("rewrite"))
+                rewritten_path = rewrite_path(path, server.rewrite)
                 
-                if server["type"].lower() == "plex":
-                    result = await self._scan_plex(server, rewritten_path, is_series)
-                elif server["type"].lower() == "jellyfin":
-                    result = await self._scan_jellyfin(server, rewritten_path, is_series)
-                elif server["type"].lower() == "emby":
-                    result = await self._scan_emby(server, rewritten_path, is_series)
-                else:
-                    result = {"status": "error", "message": f"Unsupported media server type: {server['type']}"}
-                
-                results.append({
-                    "server": server["name"],
-                    "type": server["type"],
-                    **result
-                })
+                try:
+                    result = await server.scan_path(rewritten_path)
+                    results.append({
+                        "server": server.name,
+                        "type": server.type,
+                        "status": "success",
+                        "message": result.get("message", "Scan initiated")
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to scan {server.name}: {str(e)}")
+                    results.append({
+                        "server": server.name,
+                        "type": server.type,
+                        "status": "error",
+                        "message": str(e)
+                    })
                 
             except Exception as e:
-                logger.error(f"Failed to scan {server['name']}: {str(e)}")
+                logger.error(f"Failed to process server {server.name}: {str(e)}")
                 results.append({
-                    "server": server["name"],
-                    "type": server["type"],
+                    "server": server.name,
+                    "type": server.type,
                     "status": "error",
                     "message": str(e)
                 })

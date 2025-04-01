@@ -432,8 +432,19 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('search_on_sync', searchOnSync);
         
         // Add enabled events
-        document.querySelectorAll('input[name="enabled_events"]:checked').forEach(input => {
-            formData.append('enabled_events', input.value);
+        const enabledEvents = new Set();
+        // Only get events from the visible section (sonarr or radarr)
+        const visibleEvents = document.getElementById('sonarrEvents').style.display !== 'none' 
+            ? document.getElementById('sonarrEvents')
+            : document.getElementById('radarrEvents');
+        visibleEvents.querySelectorAll('input[name="enabled_events"]:checked').forEach(input => {
+            enabledEvents.add(input.value);
+        });
+        // Clear any existing enabled_events from formData
+        formData.delete('enabled_events');
+        // Add only the currently checked events
+        Array.from(enabledEvents).forEach(event => {
+            formData.append('enabled_events', event);
         });
         
         // Add rewrite rules

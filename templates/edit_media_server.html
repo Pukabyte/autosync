@@ -183,6 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const addRuleBtn = document.getElementById('add_rewrite_rule');
     const connectionStatus = document.getElementById('connectionStatus');
     const authKeyStatus = document.getElementById('authKeyStatus');
+    const nameInput = document.getElementById('name');  
     
     updateAuthFields();
     
@@ -238,6 +239,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const type = typeSelect.value;
         const authKey = authKeyInput.value;
         const enabled = document.getElementById('enabled').checked;
+        const name = nameInput.value;
         
         if (!url) {
             alert('Please fill in the URL');
@@ -253,6 +255,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData();
         formData.append('type', type);
         formData.append('url', url);
+        formData.append('new_name', name);
         formData.append('enabled', enabled);
         
         // Add rewrite rules
@@ -282,7 +285,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const testResult = await testResponse.json();
             
             if (testResult.status === 'success') {
-                // If connection test succeeds, submit the form with fetch
+                // If connection test succeeds, submit the form
                 const submitResponse = await fetch(form.action, {
                     method: 'POST',
                     body: formData

@@ -426,6 +426,7 @@ async def edit_instance(
     request: Request,
     name: str,
     type: str,
+    new_name: str = Form(...),
     url: str = Form(...),
     api_key: str = Form(...),
     root_folder_path: str = Form(...),
@@ -443,7 +444,7 @@ async def edit_instance(
     
     # Create updated instance data
     instance_data = {
-        "name": name,
+        "name": new_name,
         "type": type,
         "url": url,
         "api_key": api_key,
@@ -512,6 +513,7 @@ async def edit_media_server_form(request: Request, name: str):
 async def edit_media_server(
     request: Request,
     name: str,
+    new_name: str = Form(...),
     type: str = Form(...),
     url: str = Form(...),
     token: Optional[str] = Form(None),
@@ -525,7 +527,7 @@ async def edit_media_server(
     
     # Create updated server data
     server_data = {
-        "name": name,
+        "name": new_name,
         "type": type,
         "url": url,
         "enabled": enabled

@@ -11,7 +11,7 @@
             <form id="editInstanceForm" method="POST" action="/instances/edit/{{ instance.name }}/{{ instance.type }}" class="mt-4">
                 <div class="mb-3">
                     <label for="name" class="form-label">Name</label>
-                    <input type="text" class="form-control" id="name" name="name" value="{{ instance.name }}" readonly>
+                    <input type="text" class="form-control" id="name" name="name" value="{{ instance.name }}" required>
                     <div class="form-text">A unique name to identify this instance</div>
                 </div>
                 
@@ -212,6 +212,8 @@ async function loadInstanceData() {
     const qualityProfileSelect = document.getElementById('quality_profile_id');
     const connectionStatus = document.getElementById('connectionStatus');
     const apiKeyStatus = document.getElementById('apiKeyStatus');
+    const enabledEvents = document.getElementById('enabled_events');
+    const nameInput = document.getElementById('name');
     
     const url = urlInput.value;
     const apiKey = apiKeyInput.value;
@@ -314,6 +316,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const connectionStatus = document.getElementById('connectionStatus');
     const apiKeyStatus = document.getElementById('apiKeyStatus');
     const testConnectionBtn = document.querySelector('button[type="button"]');
+    const enabledEvents = document.getElementById('enabled_events');
+    const nameInput = document.getElementById('name');
     
     // Add event listener for test connection button
     testConnectionBtn.addEventListener('click', testConnection);
@@ -393,7 +397,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = new FormData();
         formData.append('type', type);
         formData.append('url', url);
-        formData.append('name', name);
+        formData.append('new_name', name);
         formData.append('api_key', apiKey);
         formData.append('root_folder_path', rootFolderPath);
         formData.append('quality_profile_id', qualityProfileId);
@@ -403,8 +407,19 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('search_on_sync', searchOnSync);
         
         // Add enabled events
-        document.querySelectorAll('input[name="enabled_events"]:checked').forEach(input => {
-            formData.append('enabled_events', input.value);
+        const enabledEvents = new Set();
+        // Only get events from the visible section (sonarr or radarr)
+        const visibleEvents = document.getElementById('sonarrEvents').style.display !== 'none' 
+            ? document.getElementById('sonarrEvents')
+            : document.getElementById('radarrEvents');
+        visibleEvents.querySelectorAll('input[name="enabled_events"]:checked').forEach(input => {
+            enabledEvents.add(input.value);
+        });
+        // Clear any existing enabled_events from formData
+        formData.delete('enabled_events');
+        // Add only the currently checked events
+        Array.from(enabledEvents).forEach(event => {
+            formData.append('enabled_events', event);
         });
         
         // Add rewrite rules
@@ -428,7 +443,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const testResult = await testResponse.json();
             
             if (testResult.status === 'success') {
-                // If connection test succeeds, submit the form with fetch
+                // If connection test succeeds, submit the form
                 const submitResponse = await fetch(form.action, {
                     method: 'POST',
                     body: formData

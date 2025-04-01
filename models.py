@@ -4,6 +4,8 @@ from enum import Enum
 import aiohttp
 import xml.etree.ElementTree as ET
 import logging
+import json
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -266,8 +268,11 @@ class PlexServer(MediaServerBase):
         if not section_id:
             raise ValueError(f"No matching library section found for path: {path}")
 
-        # Trigger scan for the section
-        await self._make_request("POST", f"library/sections/{section_id}/refresh")
+        # URL encode the path
+        encoded_path = quote(path)
+
+        # Trigger scan for the section with the specific path
+        await self._make_request("POST", f"library/sections/{section_id}/refresh?path={encoded_path}")
         return {"status": "success", "message": "Scan initiated"}
 
 class JellyfinServer(MediaServerBase):
@@ -361,7 +366,8 @@ class SonarrInstance(BaseModel):
             async with session.delete(url, headers=self.headers) as response:
                 if response.status != 200:
                     raise Exception(f"Failed to delete series: {await response.text()}")
-                return await response.json()
+                # Sonarr's DELETE endpoint doesn't return JSON
+                return {"status": "success", "message": "Series deleted successfully"}
     
     async def delete_episode(self, episode_id: int) -> Dict[str, Any]:
         """Delete an episode file"""
@@ -470,7 +476,13 @@ class RadarrInstance(BaseModel):
         async with aiohttp.ClientSession() as session:
             async with session.delete(url, headers=self.headers) as response:
                 if response.status != 200:
-                    raise Exception(f"Failed to delete movie file: {await response.text()}")
+                    error_text = await response.text()
+                    try:
+                        error_json = json.loads(error_text)
+                        error_message = error_json.get("message", error_text)
+                    except:
+                        error_message = error_text
+                    raise Exception(f"Failed to delete movie file: {error_message}")
                 return await response.json()
 
     async def refresh_movie(self, movie_id: int) -> Dict[str, Any]:
@@ -484,4 +496,29 @@ class RadarrInstance(BaseModel):
             async with session.post(url, headers=self.headers, json=data) as response:
                 if response.status != 201:
                     raise Exception(f"Failed to refresh movie: {await response.text()}")
+                return await response.json()
+
+    async def import_movie(self, tmdb_id: int, path: str) -> Dict[str, Any]:
+        """Import a movie by refreshing and rescanning"""
+        # First get the movie ID from TMDB ID
+        movie = await self.get_movie_by_tmdb_id(tmdb_id)
+        if not movie:
+            raise ValueError(f"Movie with TMDB ID {tmdb_id} not found")
+            
+        movie_id = movie["id"]
+        
+        # First refresh the movie
+        await self.refresh_movie(movie_id)
+        
+        # Then trigger a rescan
+        url = f"{self.base_url}/api/v3/command"
+        data = {
+            "name": "RescanMovie",
+            "movieId": movie_id
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self.headers, json=data) as response:
+                if response.status != 201:
+                    raise Exception(f"Failed to rescan movie: {await response.text()}")
                 return await response.json()

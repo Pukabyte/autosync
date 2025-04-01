@@ -282,8 +282,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const testResult = await testResponse.json();
             
             if (testResult.status === 'success') {
-                // If connection test succeeds, submit the form
-                const submitResponse = await fetch(this.action, {
+                // If connection test succeeds, submit the form with fetch
+                const submitResponse = await fetch(form.action, {
                     method: 'POST',
                     body: formData
                 });
@@ -292,13 +292,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.location.href = '/';
                 } else {
                     const errorData = await submitResponse.json();
-                    alert(errorData.message || 'Failed to update server');
+                    alert(errorData.message || 'Failed to save changes');
                 }
             } else {
                 alert(testResult.message);
             }
         } catch (error) {
-            alert(`Connection test failed: ${error.message}`);
+            alert(`Failed to save changes: ${error.message}`);
         }
     });
 });

@@ -345,7 +345,10 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=True)
+        # Use parent path for better Plex library scanning
+        scan_path = str(Path(path).parent)
+        logger.info(f"  ├─ Using parent path for scanning: \033[1m{scan_path}\033[0m")
+        scan_results = await scanner.scan_path(scan_path, is_series=True)
         results["scanResults"] = scan_results
         
         # Log scan results

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------------------
 # Radarr-Specific Functions
 # ------------------------------------------------------------------------------
-def get_movie_by_tmdbid(
+def get_movie_by_tmdb_id(
     base_url: str, api_key: str, tmdb_id: int
 ) -> List[Dict[str, Any]]:
     """
@@ -153,7 +153,7 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
     for instance in instances:
         try:
             # Check if movie exists
-            existing_movie = get_movie_by_tmdb_id(instance.url, instance.api_key, movie_id)
+            existing_movie = await instance.get_movie_by_tmdb_id(movie_id)
             
             if existing_movie:
                 logger.debug(f"  ├─ Movie already exists (id={existing_movie['id']}) on \033[1m{instance.name}\033[0m")

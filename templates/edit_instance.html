@@ -54,7 +54,7 @@
                 </div>
                 
                 {% if instance.type == "sonarr" %}
-                <div class="mb-3" id="seasonFolderSection">
+                <div class="mb-3">
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="season_folder" name="season_folder" {% if instance.season_folder %}checked{% endif %}>
                         <label class="form-check-label" for="season_folder">
@@ -397,7 +397,9 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('api_key', apiKey);
         formData.append('root_folder_path', rootFolderPath);
         formData.append('quality_profile_id', qualityProfileId);
-        formData.append('season_folder', seasonFolder);
+        if (type === 'sonarr') {
+            formData.append('season_folder', seasonFolder);
+        }
         formData.append('search_on_sync', searchOnSync);
         
         // Add enabled events
@@ -417,16 +419,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         try {
-            const response = await fetch('/test-connection', {
+            // First test the connection
+            const testResponse = await fetch('/test-connection', {
                 method: 'POST',
                 body: formData
             });
             
-            const result = await response.json();
+            const testResult = await testResponse.json();
             
-            if (result.status === 'success') {
-                // If connection test succeeds, submit the form
-                const submitResponse = await fetch(this.action, {
+            if (testResult.status === 'success') {
+                // If connection test succeeds, submit the form with fetch
+                const submitResponse = await fetch(form.action, {
                     method: 'POST',
                     body: formData
                 });
@@ -438,10 +441,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     alert(errorData.message || 'Failed to save changes');
                 }
             } else {
-                alert(result.message);
+                alert(testResult.message);
             }
         } catch (error) {
-            alert(`Connection test failed: ${error.message}`);
+            alert(`Failed to save changes: ${error.message}`);
         }
     });
 });

@@ -169,12 +169,14 @@ async def index(request: Request):
     
     # Get instances
     sonarr_instances = [
-        inst for inst in config.get("instances", [])
+        SonarrInstance(**inst)
+        for inst in config.get("instances", [])
         if inst.get("type", "").lower() == "sonarr"
     ]
     
     radarr_instances = [
-        inst for inst in config.get("instances", [])
+        RadarrInstance(**inst)
+        for inst in config.get("instances", [])
         if inst.get("type", "").lower() == "radarr"
     ]
     
@@ -1103,12 +1105,12 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Try to scan using the most specific path available
                     scan_path = None
-                    if series_path:  # Use series path for better Plex library scanning
+                    if file_path:  # Use episode file path to get season folder
+                        scan_path = str(Path(file_path).parent)  # Get season folder path
+                        logger.debug(f"Using season folder path for scanning: {scan_path}")
+                    elif series_path:  # Fallback to series path if file path not available
                         scan_path = series_path
                         logger.debug(f"Using series path for scanning: {scan_path}")
-                    elif file_path:  # Fallback to file path if series path not available
-                        scan_path = file_path
-                        logger.debug(f"Using episode file path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:
@@ -1200,12 +1202,12 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Try to scan using the most specific path available
                     scan_path = None
-                    if folder_path:  # Use folder path for better Plex library scanning
+                    if folder_path:  # Use movie folder path for better Plex library scanning
                         scan_path = folder_path
                         logger.debug(f"Using movie folder path for scanning: {scan_path}")
-                    elif file_path:  # Fallback to file path if folder path not available
-                        scan_path = file_path
-                        logger.debug(f"Using movie file path for scanning: {scan_path}")
+                    elif file_path:  # Fallback to movie file path if folder path not available
+                        scan_path = str(Path(file_path).parent)  # Get movie folder path
+                        logger.debug(f"Using movie file parent path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:

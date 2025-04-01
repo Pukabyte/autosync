@@ -468,7 +468,8 @@ class RadarrInstance(BaseModel):
             async with session.delete(url, headers=self.headers) as response:
                 if response.status != 200:
                     raise Exception(f"Failed to delete movie: {await response.text()}")
-                return await response.json()
+                # Radarr's delete endpoint doesn't return any JSON response
+                return {"status": "success"}
     
     async def delete_movie_file(self, movie_file_id: int) -> Dict[str, Any]:
         """Delete a movie file"""

@@ -20,7 +20,12 @@ from models import (
 )
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
-from radarr_service import handle_radarr_grab, handle_radarr_import
+from radarr_service import (
+    handle_radarr_grab,
+    handle_radarr_import,
+    handle_radarr_delete,
+    handle_radarr_movie_add,
+)
 from sonarr_service import handle_sonarr_grab, handle_sonarr_import, handle_sonarr_series_add
 from utils import load_config, get_config, save_config, parse_time_string
 from media_server_service import MediaServerScanner
@@ -860,113 +865,6 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
     
     return results
 
-async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance]):
-    """Handle movie or movie file deletion by syncing across instances and scanning media servers"""
-    movie_data = payload.get("movie", {})
-    movie_id = movie_data.get("tmdbId")
-    title = movie_data.get("title", "Unknown")
-    path = movie_data.get("folderPath") or movie_data.get("path")
-    event_type = payload.get("eventType")
-    
-    results = {
-        "status": "ok",
-        "event": event_type,
-        "title": title,
-        "tmdbId": movie_id,
-        "deletions": [],
-        "scanResults": []
-    }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
-    
-    # Log the delete event
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    logger.info(f"Processing Radarr {event_type}: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
-    if path:
-        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
-    
-    # Sync deletion across instances
-    for i, instance in enumerate(instances):
-        try:
-            # Apply sync interval between instances (but not before the first one)
-            if i > 0 and sync_interval > 0:
-                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
-                await asyncio.sleep(sync_interval)
-                
-            if event_type == "MovieDelete":
-                # Delete movie from instance
-                response = await instance.delete_movie(movie_id)
-                logger.info(f"  ├─ Deleted movie from \033[1m{instance.name}\033[0m")
-            elif event_type == "MovieFileDelete":
-                # Delete movie file from instance
-                movie_file_id = payload.get("movieFile", {}).get("id")
-                response = await instance.delete_movie_file(movie_file_id)
-                logger.info(f"  ├─ Deleted movie file from \033[1m{instance.name}\033[0m")
-            
-            results["deletions"].append({
-                "instance": instance.name,
-                "status": "success"
-            })
-        except Exception as e:
-            error_msg = str(e)
-            if "message" in error_msg:
-                try:
-                    error_json = json.loads(error_msg)
-                    error_msg = error_json.get("message", error_msg)
-                except:
-                    pass
-            logger.error(f"  ├─ Failed to delete from \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
-            results["deletions"].append({
-                "instance": instance.name,
-                "status": "error",
-                "error": error_msg
-            })
-
-    # Log deletion results
-    successful_deletes = len([d for d in results["deletions"] if d["status"] == "success"])
-    failed_deletes = len([d for d in results["deletions"] if d["status"] == "error"])
-    
-    logger.info(f"  ├─ Deletion results:")
-    if successful_deletes > 0:
-        logger.info(f"  │   ├─ Deleted from \033[1m{successful_deletes}\033[0m instance(s)")
-    if failed_deletes > 0:
-        logger.info(f"  │   └─ Failed on \033[1m{failed_deletes}\033[0m instance(s)")
-
-    # Scan media servers if path exists
-    if path:
-        # Apply sync interval before media server scanning
-        if sync_interval > 0 and results["deletions"]:
-            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
-            await asyncio.sleep(sync_interval)
-            
-        scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=False)
-        results["scanResults"] = scan_results
-        
-        # Log scan results
-        successful_scans = [s for s in scan_results if s.get("status") == "success"]
-        failed_scans = [s for s in scan_results if s.get("status") == "error"]
-        
-        logger.info(f"  └─ Scan results:")
-        if successful_scans:
-            for scan in successful_scans[:-1]:
-                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
-            if successful_scans:
-                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
-        if failed_scans:
-            for scan in failed_scans[:-1]:
-                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
-            if failed_scans:
-                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
-    else:
-        logger.info("  └─ No path provided for media server scanning")
-    
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
-    return results
-
 @app.post("/webhook")
 async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
     """
@@ -1233,6 +1131,9 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             elif event_type in ["MovieDelete", "MovieFileDelete"]:
                 logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
                 return await handle_radarr_delete(payload, valid_instances)
+            elif event_type == "MovieAdded":
+                logger.info(f"Received {event_type} event, syncing movie addition across instances")
+                return await handle_radarr_movie_add(payload, valid_instances)
             else:
                 logger.info(f"Unhandled Radarr event type: {event_type}")
                 return {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
@@ -1343,118 +1244,6 @@ async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrIn
             
         scanner = MediaServerScanner(config.get("media_servers", []))
         scan_results = await scanner.scan_path(path, is_series=True)
-        results["scanResults"] = scan_results
-        
-        # Log scan results
-        successful_scans = [s for s in scan_results if s.get("status") == "success"]
-        failed_scans = [s for s in scan_results if s.get("status") == "error"]
-        
-        logger.info(f"  └─ Scan results:")
-        if successful_scans:
-            for scan in successful_scans[:-1]:
-                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
-            if successful_scans:
-                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
-        if failed_scans:
-            for scan in failed_scans[:-1]:
-                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
-            if failed_scans:
-                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
-    else:
-        logger.info("  └─ No path provided for media server scanning")
-    
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
-    return results
-
-async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrInstance]):
-    """Handle movie rename by syncing across instances and scanning media servers"""
-    movie_data = payload.get("movie", {})
-    movie_id = movie_data.get("tmdbId")
-    title = movie_data.get("title", "Unknown")
-    path = movie_data.get("folderPath") or movie_data.get("path")
-    
-    results = {
-        "status": "ok",
-        "event": "Rename",
-        "title": title,
-        "tmdbId": movie_id,
-        "renames": [],
-        "scanResults": []
-    }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
-    
-    # Log the rename event
-    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    logger.info(f"Processing Radarr Rename: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
-    if path:
-        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
-    
-    # Sync rename across instances
-    for i, instance in enumerate(instances):
-        try:
-            # Apply sync interval between instances (but not before the first one)
-            if i > 0 and sync_interval > 0:
-                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
-                await asyncio.sleep(sync_interval)
-            
-            # Get the movie from the instance
-            movie = await instance.get_movie_by_tmdb_id(movie_id)
-            if movie:
-                # Trigger movie refresh to update filenames
-                response = await instance.refresh_movie(movie['id'])
-                logger.info(f"  ├─ Refreshed movie in \033[1m{instance.name}\033[0m")
-                results["renames"].append({
-                    "instance": instance.name,
-                    "status": "success"
-                })
-            else:
-                logger.warning(f"  ├─ Movie not found in \033[1m{instance.name}\033[0m")
-                results["renames"].append({
-                    "instance": instance.name,
-                    "status": "skipped",
-                    "reason": "Movie not found"
-                })
-        except Exception as e:
-            error_msg = str(e)
-            if "message" in error_msg:
-                try:
-                    error_json = json.loads(error_msg)
-                    error_msg = error_json.get("message", error_msg)
-                except:
-                    pass
-            logger.error(f"  ├─ Failed to rename in \033[1m{instance.name}\033[0m: \033[1m{error_msg}\033[0m")
-            results["renames"].append({
-                "instance": instance.name,
-                "status": "error",
-                "error": error_msg
-            })
-
-    # Log rename results
-    successful_renames = len([r for r in results["renames"] if r["status"] == "success"])
-    skipped_renames = len([r for r in results["renames"] if r["status"] == "skipped"])
-    failed_renames = len([r for r in results["renames"] if r["status"] == "error"])
-    
-    logger.info(f"  ├─ Rename results:")
-    if successful_renames > 0:
-        logger.info(f"  │   ├─ Refreshed in \033[1m{successful_renames}\033[0m instance(s)")
-    if skipped_renames > 0:
-        logger.info(f"  │   ├─ Skipped \033[1m{skipped_renames}\033[0m instance(s)")
-    if failed_renames > 0:
-        logger.info(f"  │   └─ Failed on \033[1m{failed_renames}\033[0m instance(s)")
-
-    # Scan media servers if path exists
-    if path:
-        # Apply sync interval before media server scanning
-        if sync_interval > 0 and results["renames"]:
-            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
-            await asyncio.sleep(sync_interval)
-            
-        scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=False)
         results["scanResults"] = scan_results
         
         # Log scan results

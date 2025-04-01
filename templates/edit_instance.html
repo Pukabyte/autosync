@@ -142,6 +142,11 @@
                             <label class="form-check-label" for="radarrEventMovieFileDelete">Movie File Delete</label>
                             <div class="form-text">When a movie file is deleted</div>
                         </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="enabled_events" value="MovieAdded" id="radarrEventMovieAdded" {% if "MovieAdded" in instance.enabled_events %}checked{% endif %}>
+                            <label class="form-check-label" for="radarrEventMovieAdded">Movie Added</label>
+                            <div class="form-text">When a movie is added to Radarr</div>
+                        </div>
                     </div>
                 </div>
                 

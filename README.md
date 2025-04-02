@@ -76,6 +76,8 @@ services:
     user: 1000:1000 # Change this to your user id
     image: ghcr.io/pukabyte/autosync:latest
     container_name: autosync
+    environment:
+      - TZ=Pacific/Auckland
     ports:
       - "3536:3536"
     volumes:

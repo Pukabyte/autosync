@@ -59,8 +59,10 @@ jobs:
           # For scheduled runs, use nightly tag
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             NEW_TAG="nightly-$(date +%Y%m%d)"
+            echo "NIGHTLY=true" >> $GITHUB_ENV
           else
             NEW_TAG="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+            echo "NIGHTLY=false" >> $GITHUB_ENV
           fi
           
           # Check if tag already exists
@@ -82,6 +84,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.CR_PAT }}
 
       - name: Create GitHub Release
+        if: env.NIGHTLY != 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.NEW_TAG }}
@@ -116,6 +119,7 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ env.NEW_TAG }}
             type=raw,value=${{ env.NEW_TAG }}-{{sha}}
+            type=raw,value=nightly,enable=${{ env.NIGHTLY == 'true' }}
 
       - name: Build and push Docker image
         id: build-and-push

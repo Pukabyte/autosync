@@ -35,7 +35,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.27"
+VERSION = "0.0.29"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)

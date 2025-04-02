@@ -35,7 +35,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.23"
+VERSION = "0.0.24"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -153,8 +153,14 @@ templates = Jinja2Templates(directory="templates")
 
 def get_template_context(request: Request, **kwargs) -> Dict[str, Any]:
     """Create a template context with common variables."""
-    # Get the base URL from the request, respecting forwarded protocol
+    # Get the forwarded protocol (https if forwarded, otherwise use request scheme)
+    scheme = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+    
+    # Build base URL using the correct scheme
     base_url = str(request.base_url)
+    if base_url.startswith("http:") and scheme == "https":
+        base_url = "https:" + base_url[5:]
+    
     context = {
         "request": request,
         "version": VERSION,
@@ -840,24 +846,43 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=True)
-        results["scanResults"] = scan_results
         
-        # Log scan results
-        successful_scans = [s for s in scan_results if s.get("status") == "success"]
-        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        # Determine the best path to scan based on event type
+        scan_path = None
+        if event_type == "EpisodeFileDelete":
+            # For episode deletions, use the episode file path to get season folder
+            episode_file = payload.get("episodeFile", {})
+            file_path = episode_file.get("path", "")
+            if file_path:
+                scan_path = str(Path(file_path).parent)  # Get season folder path
+                logger.debug(f"Using season folder path for scanning: {scan_path}")
+        else:
+            # For series deletions, use the series path
+            scan_path = path
+            logger.debug(f"Using series path for scanning: {scan_path}")
         
-        logger.info(f"  └─ Scan results:")
-        if successful_scans:
-            for scan in successful_scans[:-1]:
-                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+        if scan_path:
+            logger.info(f"  ├─ Using path for scanning: \033[1m{scan_path}\033[0m")
+            scan_results = await scanner.scan_path(scan_path, is_series=True)
+            results["scanResults"] = scan_results
+            
+            # Log scan results
+            successful_scans = [s for s in scan_results if s.get("status") == "success"]
+            failed_scans = [s for s in scan_results if s.get("status") == "error"]
+            
+            logger.info(f"  └─ Scan results:")
             if successful_scans:
-                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
-        if failed_scans:
-            for scan in failed_scans[:-1]:
-                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+                for scan in successful_scans[:-1]:
+                    logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+                if successful_scans:
+                    logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
             if failed_scans:
-                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+                for scan in failed_scans[:-1]:
+                    logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+                if failed_scans:
+                    logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+        else:
+            logger.info("  └─ No valid path available for media server scanning")
     else:
         logger.info("  └─ No path provided for media server scanning")
     
@@ -893,7 +918,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 if not media_servers:
                     logger.error("No media servers configured")
                     raise HTTPException(status_code=400, detail="No media servers configured")
-                
+
                 active_servers = [s for s in media_servers if s.get("enabled", False)]
                 if not active_servers:
                     logger.error("No active media servers found")
@@ -946,10 +971,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
         sync_delay = parse_time_string(config.get("sync_delay", "0"))
         sync_interval = parse_time_string(config.get("sync_interval", "0"))
         
-        if sync_delay > 0:
-            logger.info(f"Delaying webhook processing for {sync_delay} seconds")
-            await asyncio.sleep(sync_delay)
-
         # Try to parse as Sonarr webhook first
         if "series" in payload:
             # Validate event type
@@ -1017,29 +1038,37 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                         logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=True)
                         
-                        return {
+                        result = {
                             "status": "ok",
                             "message": "No Sonarr instances configured, but media servers were scanned",
                             "scanResults": scan_results,
                             "scannedPath": scan_path
                         }
-                
-                return {"status": "ignored", "reason": f"No instances configured for {event_type}"}
-            
-            if event_type == "Grab":
-                return await handle_sonarr_grab(payload, valid_instances)
-            elif event_type == "Import":
-                result = await handle_sonarr_import(payload, valid_instances)
-                return result
-            elif event_type in ["SeriesDelete", "EpisodeFileDelete"]:
-                logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
-                return await handle_sonarr_delete(payload, valid_instances)
-            elif event_type == "SeriesAdd":
-                logger.info(f"Received {event_type} event, syncing series addition across instances")
-                return await handle_sonarr_series_add(payload, valid_instances)
+                    else:
+                        result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
+                else:
+                    result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             else:
-                logger.info(f"Unhandled Sonarr event type: {event_type}")
-                return {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
+                if event_type == "Grab":
+                    result = await handle_sonarr_grab(payload, valid_instances)
+                elif event_type == "Import":
+                    result = await handle_sonarr_import(payload, valid_instances)
+                elif event_type in ["SeriesDelete", "EpisodeFileDelete"]:
+                    logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
+                    result = await handle_sonarr_delete(payload, valid_instances)
+                elif event_type == "SeriesAdd":
+                    logger.info(f"Received {event_type} event, syncing series addition across instances")
+                    result = await handle_sonarr_series_add(payload, valid_instances)
+                else:
+                    logger.info(f"Unhandled Sonarr event type: {event_type}")
+                    result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
+
+            # Apply sync delay after processing
+            if sync_delay > 0:
+                logger.info(f"Applying sync delay of {sync_delay} seconds after processing")
+                await asyncio.sleep(sync_delay)
+            
+            return result
 
         # Try to parse as Radarr webhook
         elif "movie" in payload:
@@ -1114,29 +1143,37 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                         logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=False)
                         
-                        return {
+                        result = {
                             "status": "ok",
                             "message": "No Radarr instances configured, but media servers were scanned",
                             "scanResults": scan_results,
                             "scannedPath": scan_path
                         }
-                
-                return {"status": "ignored", "reason": f"No instances configured for {event_type}"}
-            
-            if event_type == "Grab":
-                return await handle_radarr_grab(payload, valid_instances)
-            elif event_type == "Import":
-                result = await handle_radarr_import(payload, valid_instances)
-                return result
-            elif event_type in ["MovieDelete", "MovieFileDelete"]:
-                logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
-                return await handle_radarr_delete(payload, valid_instances)
-            elif event_type == "MovieAdded":
-                logger.info(f"Received {event_type} event, syncing movie addition across instances")
-                return await handle_radarr_movie_add(payload, valid_instances)
+                    else:
+                        result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
+                else:
+                    result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             else:
-                logger.info(f"Unhandled Radarr event type: {event_type}")
-                return {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
+                if event_type == "Grab":
+                    result = await handle_radarr_grab(payload, valid_instances)
+                elif event_type == "Import":
+                    result = await handle_radarr_import(payload, valid_instances)
+                elif event_type in ["MovieDelete", "MovieFileDelete"]:
+                    logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
+                    result = await handle_radarr_delete(payload, valid_instances)
+                elif event_type == "MovieAdded":
+                    logger.info(f"Received {event_type} event, syncing movie addition across instances")
+                    result = await handle_radarr_movie_add(payload, valid_instances)
+                else:
+                    logger.info(f"Unhandled Radarr event type: {event_type}")
+                    result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
+
+            # Apply sync delay after processing
+            if sync_delay > 0:
+                logger.info(f"Applying sync delay of {sync_delay} seconds after processing")
+                await asyncio.sleep(sync_delay)
+            
+            return result
 
         else:
             logger.warning("Unknown webhook type")

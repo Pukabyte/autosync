@@ -73,12 +73,13 @@ It also supports scanning media servers for new content upon import.
 version: "3"
 services:
   autosync:
+    user: 1000:1000 # Change this to your user id
     image: ghcr.io/pukabyte/autosync:latest
     container_name: autosync
     ports:
       - "3536:3536"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml
     restart: unless-stopped
 ```
 

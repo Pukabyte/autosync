@@ -5,7 +5,6 @@ on:
     - cron: '45 21 * * *'
   push:
     branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
 
@@ -31,6 +30,7 @@ jobs:
 
       # Version tagging logic
       - name: Version tagging
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/')
         run: |
           # Get the latest tag or set to v0.0.0 if none exists
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -63,9 +63,16 @@ jobs:
             NEW_TAG="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
           fi
           
+          # Check if tag already exists
+          if git tag -l | grep -q "^$NEW_TAG$"; then
+            echo "Tag $NEW_TAG already exists, skipping tag creation"
+            exit 0
+          fi
+          
           echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
 
       - name: Create and push tag
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && env.NEW_TAG != ''
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"

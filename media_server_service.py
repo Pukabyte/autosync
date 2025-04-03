@@ -48,10 +48,14 @@ class MediaServerScanner:
         """Scan a path on all configured media servers."""
         results = []
         
+        # Always get the parent path for scanning
+        scan_path = str(Path(path).parent)
+        logger.debug(f"Using parent path for scanning: {scan_path}")
+        
         for server in self.media_servers:
             try:
                 # Apply path rewriting if configured
-                rewritten_path = rewrite_path(path, server.rewrite)
+                rewritten_path = rewrite_path(scan_path, server.rewrite)
                 
                 try:
                     result = await server.scan_path(rewritten_path)

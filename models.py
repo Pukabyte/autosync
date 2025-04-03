@@ -290,7 +290,9 @@ class JellyfinServer(MediaServerBase):
 
     async def scan_path(self, path: str) -> Dict[str, Any]:
         """Scan a specific path in Jellyfin"""
-        await self._make_request("POST", "Library/Refresh")
+        # URL encode the path
+        encoded_path = quote(path)
+        await self._make_request("POST", f"Library/Refresh?path={encoded_path}")
         return {"status": "success", "message": "Scan initiated"}
 
 class EmbyServer(MediaServerBase):
@@ -308,7 +310,9 @@ class EmbyServer(MediaServerBase):
 
     async def scan_path(self, path: str) -> Dict[str, Any]:
         """Scan a specific path in Emby"""
-        await self._make_request("POST", "Library/Refresh")
+        # URL encode the path
+        encoded_path = quote(path)
+        await self._make_request("POST", f"Library/Refresh?path={encoded_path}")
         return {"status": "success", "message": "Scan initiated"}
 
 MediaServer = Union[PlexServer, JellyfinServer, EmbyServer]

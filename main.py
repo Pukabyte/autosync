@@ -847,48 +847,73 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
             
         scanner = MediaServerScanner(config.get("media_servers", []))
         
-        # Determine the best path to scan based on event type
-        scan_path = None
-        if event_type == "EpisodeFileDelete":
+        # Handle different event types
+        if event_type == "Download":
+            # For downloads, use the episode file path to get season folder
+            episode_file = payload.get("episodeFile", {})
+            file_path = episode_file.get("path", "")
+            if file_path:
+                scan_path = file_path
+                logger.debug(f"  ├─ Using episode file path for scanning: \033[1m{scan_path}\033[0m")
+            else:
+                scan_path = path
+                logger.debug(f"  ├─ Using series path for scanning: \033[1m{scan_path}\033[0m")
+        elif event_type == "EpisodeFileDelete":
             # For episode deletions, use the episode file path to get season folder
             episode_file = payload.get("episodeFile", {})
             file_path = episode_file.get("path", "")
             if file_path:
-                scan_path = str(Path(file_path).parent)  # Get season folder path
-                logger.debug(f"Using season folder path for scanning: {scan_path}")
-        else:
+                scan_path = file_path
+                logger.debug(f"  ├─ Using episode file path for scanning: \033[1m{scan_path}\033[0m")
+            else:
+                scan_path = path
+                logger.debug(f"  ├─ Using series path for scanning: \033[1m{scan_path}\033[0m")
+        elif event_type == "SeriesDelete":
             # For series deletions, use the series path
             scan_path = path
-            logger.debug(f"Using series path for scanning: {scan_path}")
-        
-        if scan_path:
-            logger.info(f"  ├─ Using path for scanning: \033[1m{scan_path}\033[0m")
-            scan_results = await scanner.scan_path(scan_path, is_series=True)
-            results["scanResults"] = scan_results
-            
-            # Log scan results
-            successful_scans = [s for s in scan_results if s.get("status") == "success"]
-            failed_scans = [s for s in scan_results if s.get("status") == "error"]
-            
-            logger.info(f"  └─ Scan results:")
-            if successful_scans:
-                for scan in successful_scans[:-1]:
-                    logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
-                if successful_scans:
-                    logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
-            if failed_scans:
-                for scan in failed_scans[:-1]:
-                    logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
-                if failed_scans:
-                    logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+            logger.debug(f"  ├─ Using series path for scanning: \033[1m{scan_path}\033[0m")
         else:
-            logger.info("  └─ No valid path available for media server scanning")
+            # For other events, use the series path
+            scan_path = path
+            logger.debug(f"  ├─ Using series path for scanning: \033[1m{scan_path}\033[0m")
+        
+        scan_results = []
+        if scan_path:
+            logger.info(f"  ├─ Initiating scan for path: \033[1m{scan_path}\033[0m")
+            scan_results = await scanner.scan_path(scan_path, is_series=True)
+            
+            result = {
+                "status": "ok",
+                "message": f"Successfully scanned {len(scan_results)} media server(s)",
+                "scanResults": scan_results,
+                "scannedPath": scan_path
+            }
+        else:
+            result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
+        
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
     else:
         logger.info("  └─ No path provided for media server scanning")
     
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    return results
+    return result
 
 @app.post("/webhook")
 async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:

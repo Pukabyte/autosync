@@ -148,7 +148,7 @@
                 <div class="card-body">
                     <p>Configure your Sonarr and Radarr instances to use the following webhook URL:</p>
                     <div class="input-group">
-                        <input type="text" class="form-control" value="http://{{ request.headers.get('host') }}/webhook" id="webhookUrl" readonly>
+                        <input type="text" class="form-control" value="{{ 'https' if '.' in request.headers.get('host') else 'http' }}://{{ request.headers.get('host') }}/webhook" id="webhookUrl" readonly>
                         <button class="btn btn-outline-secondary" type="button" onclick="copyWebhookUrl()">Copy</button>
                     </div>
                 </div>

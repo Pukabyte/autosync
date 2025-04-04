@@ -35,7 +35,7 @@ from pathlib import Path
 import aiohttp
 
 # Application version - update this when creating new releases
-VERSION = "0.0.32"
+VERSION = "0.0.34"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
@@ -921,10 +921,20 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
     Handle webhooks from Sonarr and Radarr with proper validation.
     """
     try:
+        # Get sync timing settings
+        config = get_config()
+        sync_delay = parse_time_string(config.get("sync_delay", "0"))
+        sync_interval = parse_time_string(config.get("sync_interval", "0"))
+        
         event_type = payload.get("eventType")
         if not event_type:
             raise ValueError("Webhook payload missing eventType")
 
+        # Apply sync delay after webhook is received
+        if sync_delay > 0:
+            logger.info(f"Applying sync delay of {sync_delay} seconds after webhook received")
+            await asyncio.sleep(sync_delay)
+        
         # Handle manual scan requests
         if event_type == "ManualScan":
             try:
@@ -937,7 +947,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 logger.info(f"Manual scan requested for path: \033[1m{path}\033[0m")
                 logger.info(f"Content type: \033[1m{content_type}\033[0m")
                 
-                config = get_config()
                 media_servers = config.get("media_servers", [])
                 
                 if not media_servers:
@@ -992,10 +1001,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
         # Generate a unique ID for this webhook
         webhook_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
 
-        # Get sync timing settings
-        sync_delay = parse_time_string(config.get("sync_delay", "0"))
-        sync_interval = parse_time_string(config.get("sync_interval", "0"))
-        
         # Try to parse as Sonarr webhook first
         if "series" in payload:
             # Validate event type
@@ -1028,10 +1033,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 
                 # Even if no instances are configured, we should still scan media servers for Import events
                 if event_type == "Import":
-                    # Get config for sync timing
-                    config = get_config()
-                    sync_interval = parse_time_string(config.get("sync_interval", "0"))
-                    
                     # Get paths from payload for scanning
                     series_data = payload.get("series", {})
                     episode_file = payload.get("episodeFile", {})
@@ -1051,9 +1052,9 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Try to scan using the most specific path available
                     scan_path = None
-                    if file_path:  # Use episode file path to get season folder
-                        scan_path = str(Path(file_path).parent)  # Get season folder path
-                        logger.debug(f"Using season folder path for scanning: {scan_path}")
+                    if file_path:  # Use the full episode file path
+                        scan_path = file_path
+                        logger.debug(f"Using episode file path for scanning: {scan_path}")
                     elif series_path:  # Fallback to series path if file path not available
                         scan_path = series_path
                         logger.debug(f"Using series path for scanning: {scan_path}")
@@ -1088,10 +1089,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     logger.info(f"Unhandled Sonarr event type: {event_type}")
                     result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
 
-            # Apply sync delay after processing
-            if sync_delay > 0:
-                logger.info(f"Applying sync delay of {sync_delay} seconds after processing")
-                await asyncio.sleep(sync_delay)
+            # Apply interval delay after processing
+            if sync_interval > 0:
+                logger.info(f"Applying interval delay of {sync_interval} seconds after processing")
+                await asyncio.sleep(sync_interval)
             
             return result
 
@@ -1133,10 +1134,6 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 
                 # Even if no instances are configured, we should still scan media servers for Import events
                 if event_type == "Import":
-                    # Get config for sync timing
-                    config = get_config()
-                    sync_interval = parse_time_string(config.get("sync_interval", "0"))
-                    
                     # Get paths from payload for scanning
                     movie_data = payload.get("movie", {})
                     movie_file = payload.get("movieFile", {})
@@ -1156,12 +1153,13 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Try to scan using the most specific path available
                     scan_path = None
-                    if folder_path:  # Use movie folder path for better Plex library scanning
+                    if file_path:  # Use movie file path to get movie folder
+                        scan_path = str(Path(file_path).parent)  # Get movie folder path
+                        logger.debug(f"Using movie file path for scanning: {file_path}")
+                        logger.debug(f"Using movie folder path for scanning: {scan_path}")
+                    elif folder_path:  # Fallback to movie folder path if file path not available
                         scan_path = folder_path
                         logger.debug(f"Using movie folder path for scanning: {scan_path}")
-                    elif file_path:  # Fallback to movie file path if folder path not available
-                        scan_path = str(Path(file_path).parent)  # Get movie folder path
-                        logger.debug(f"Using movie file parent path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:
@@ -1193,10 +1191,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     logger.info(f"Unhandled Radarr event type: {event_type}")
                     result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
 
-            # Apply sync delay after processing
-            if sync_delay > 0:
-                logger.info(f"Applying sync delay of {sync_delay} seconds after processing")
-                await asyncio.sleep(sync_delay)
+            # Apply interval delay after processing
+            if sync_interval > 0:
+                logger.info(f"Applying interval delay of {sync_interval} seconds after processing")
+                await asyncio.sleep(sync_interval)
             
             return result
 

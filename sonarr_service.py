@@ -263,6 +263,10 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
     title = series_data.get("title", "Unknown")
     path = series_data.get("path")
     
+    # Get episode file path if available
+    episode_file = payload.get("episodeFile", {})
+    file_path = episode_file.get("path", "")
+    
     results = {
         "status": "ok",
         "event": "Import",
@@ -280,7 +284,9 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info(f"Processing Sonarr import: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
     if path:
-        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+        logger.info(f"  ├─ Series path: \033[1m{path}\033[0m")
+    if file_path:
+        logger.info(f"  ├─ Episode file path: \033[1m{file_path}\033[0m")
     
     # Sync import across instances
     for i, instance in enumerate(instances):
@@ -338,16 +344,20 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
         logger.info(f"  │   └─ Failed on \033[1m{failed_imports}\033[0m instance(s)")
 
     # Scan media servers if path exists
-    if path:
+    if file_path or path:
         # Apply sync interval before media server scanning
         if sync_interval > 0 and results["imports"]:
             logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        # Use parent path for better Plex library scanning
-        scan_path = str(Path(path).parent)
+        
+        # Use episode file path if available, otherwise use series path
+        scan_path = file_path if file_path else path
+        # Get parent directory for scanning
+        scan_path = str(Path(scan_path).parent)
         logger.info(f"  ├─ Using parent path for scanning: \033[1m{scan_path}\033[0m")
+        
         scan_results = await scanner.scan_path(scan_path, is_series=True)
         results["scanResults"] = scan_results
         

@@ -139,7 +139,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ env.NIGHTLY != 'true' }}
             type=raw,value=${{ env.NEW_TAG }}
             type=raw,value=${{ env.NEW_TAG }}-{{sha}}
             type=raw,value=nightly,enable=${{ env.NIGHTLY == 'true' }}

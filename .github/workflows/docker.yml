@@ -51,10 +51,14 @@ jobs:
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
           
-          # Extract version components
-          MAJOR=$(echo $LATEST_TAG | sed 's/v\([0-9]*\)\..*/\1/')
-          MINOR=$(echo $LATEST_TAG | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
-          PATCH=$(echo $LATEST_TAG | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
+          # Find the last semantic version tag
+          LAST_SEMVER=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1 || echo "v0.0.0")
+          echo "LAST_SEMVER=$LAST_SEMVER" >> $GITHUB_ENV
+          
+          # Extract version components from the last semantic version
+          MAJOR=$(echo $LAST_SEMVER | sed 's/v\([0-9]*\)\..*/\1/')
+          MINOR=$(echo $LAST_SEMVER | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
+          PATCH=$(echo $LAST_SEMVER | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
           
           # Determine version bump
           if [[ "${{ github.event.head_commit.message }}" == *"#major"* ]]; then

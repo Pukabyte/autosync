@@ -28,9 +28,24 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.CR_PAT }}
 
+      # Check if this is a scheduled build that was just pushed
+      - name: Check for scheduled build push
+        id: check_scheduled
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Get the last commit message
+            LAST_COMMIT=$(git log -1 --pretty=%B)
+            if [[ "$LAST_COMMIT" == *"Release nightly"* ]]; then
+              echo "is_scheduled_push=true" >> $GITHUB_OUTPUT
+              echo "This appears to be a scheduled build that was just pushed, skipping build"
+              exit 0
+            fi
+          fi
+          echo "is_scheduled_push=false" >> $GITHUB_OUTPUT
+
       # Version tagging logic
       - name: Version tagging
-        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && steps.check_scheduled.outputs.is_scheduled_push != 'true'
         run: |
           # Get the latest tag or set to v0.0.0 if none exists
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -61,6 +76,7 @@ jobs:
             NEW_TAG="nightly-$(date +%Y%m%d)"
             echo "NIGHTLY=true" >> $GITHUB_ENV
           else
+            # For manual pushes, use semantic versioning
             NEW_TAG="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
             echo "NIGHTLY=false" >> $GITHUB_ENV
           fi
@@ -74,7 +90,7 @@ jobs:
           echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
 
       - name: Create and push tag
-        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && env.NEW_TAG != ''
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && env.NEW_TAG != '' && steps.check_scheduled.outputs.is_scheduled_push != 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -84,7 +100,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.CR_PAT }}
 
       - name: Create GitHub Release
-        if: env.NIGHTLY != 'true'
+        if: env.NIGHTLY != 'true' && steps.check_scheduled.outputs.is_scheduled_push != 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.NEW_TAG }}
@@ -97,13 +113,15 @@ jobs:
 
       # Docker build and push setup
       - name: Set up QEMU
+        if: steps.check_scheduled.outputs.is_scheduled_push != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.check_scheduled.outputs.is_scheduled_push != 'true'
         uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226
 
       - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.check_scheduled.outputs.is_scheduled_push != 'true'
         uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d
         with:
           registry: ${{ env.REGISTRY }}
@@ -111,6 +129,7 @@ jobs:
           password: ${{ secrets.CR_PAT }}
 
       - name: Extract Docker metadata
+        if: steps.check_scheduled.outputs.is_scheduled_push != 'true'
         id: meta
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
         with:
@@ -122,6 +141,7 @@ jobs:
             type=raw,value=nightly,enable=${{ env.NIGHTLY == 'true' }}
 
       - name: Build and push Docker image
+        if: steps.check_scheduled.outputs.is_scheduled_push != 'true'
         id: build-and-push
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09
         with:
@@ -135,13 +155,13 @@ jobs:
 
       # Install cosign for image signing
       - name: Install cosign
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.check_scheduled.outputs.is_scheduled_push != 'true'
         uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20
         with:
           cosign-release: 'v2.2.4'
 
       - name: Sign the published Docker image
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' && steps.check_scheduled.outputs.is_scheduled_push != 'true' }}
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}

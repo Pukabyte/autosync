@@ -764,7 +764,7 @@ async def debug_webhook(payload: Dict[str, Any], request: Request) -> Dict[str, 
         "payload": payload,
     }
 
-async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrInstance]):
+async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]):
     """Handle series or episode deletion by syncing across instances and scanning media servers"""
     series_data = payload.get("series", {})
     series_id = series_data.get("tvdbId")
@@ -780,10 +780,6 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
         "deletions": [],
         "scanResults": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the delete event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -930,9 +926,49 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
         if not event_type:
             raise ValueError("Webhook payload missing eventType")
 
-        # Apply sync delay after webhook is received
+        # Generate a unique ID for this webhook
+        webhook_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
+        
+        # Log webhook receipt and acknowledge it
+        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        logger.info(f"Received webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+        
+        # Return immediate acknowledgment
+        response = {
+            "status": "received",
+            "webhook_id": webhook_id,
+            "event_type": event_type,
+            "message": "Webhook received, processing will begin after sync delay"
+        }
+        
+        # Start background task for processing
+        asyncio.create_task(process_webhook(payload, event_type, webhook_id, sync_delay, sync_interval))
+        
+        return response
+
+    except ValueError as e:
+        logger.warning(f"Invalid webhook format: {str(e)}")
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "reason": f"Invalid webhook format: {str(e)}"},
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to process webhook: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "reason": f"Internal server error: {str(e)}"},
+        )
+
+async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: str, sync_delay: float, sync_interval: float):
+    """Process webhook payload with proper timing."""
+    try:
+        # Get config for event validation
+        config = get_config()
+        
+        # Apply sync delay before processing
         if sync_delay > 0:
-            logger.info(f"Applying sync delay of {sync_delay} seconds after webhook received")
+            logger.info(f"  ├─ Applying sync delay of {sync_delay} seconds before processing")
             await asyncio.sleep(sync_delay)
         
         # Handle manual scan requests
@@ -944,25 +980,25 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 if not path or not content_type:
                     raise ValueError("Manual scan requires path and contentType")
                 
-                logger.info(f"Manual scan requested for path: \033[1m{path}\033[0m")
-                logger.info(f"Content type: \033[1m{content_type}\033[0m")
+                logger.info(f"  ├─ Manual scan requested for path: \033[1m{path}\033[0m")
+                logger.info(f"  ├─ Content type: \033[1m{content_type}\033[0m")
                 
                 media_servers = config.get("media_servers", [])
                 
                 if not media_servers:
-                    logger.error("No media servers configured")
+                    logger.error("  ├─ No media servers configured")
                     raise HTTPException(status_code=400, detail="No media servers configured")
 
                 active_servers = [s for s in media_servers if s.get("enabled", False)]
                 if not active_servers:
-                    logger.error("No active media servers found")
+                    logger.error("  ├─ No active media servers found")
                     raise HTTPException(status_code=400, detail="No active media servers found")
                     
-                logger.info(f"Found \033[1m{len(active_servers)}\033[0m active media server(s)")
+                logger.info(f"  ├─ Found \033[1m{len(active_servers)}\033[0m active media server(s)")
                 
                 # Validate content type
                 if content_type not in ["series", "movie"]:
-                    logger.error(f"Invalid content type: {content_type}")
+                    logger.error(f"  ├─ Invalid content type: {content_type}")
                     raise HTTPException(status_code=400, detail="Content type must be either 'series' or 'movie'")
                 
                 # Initialize scanner and perform scan
@@ -972,7 +1008,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 # Check if any scans were successful
                 successful_scans = [r for r in scan_results if r.get("status") == "success"]
                 if not successful_scans:
-                    logger.warning("No successful scans completed")
+                    logger.warning("  ├─ No successful scans completed")
                     return {
                         "status": "warning",
                         "message": "No successful scans completed",
@@ -992,20 +1028,14 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             except HTTPException:
                 raise
             except Exception as e:
-                logger.error(f"Manual scan failed: {str(e)}", exc_info=True)
+                logger.error(f"  ├─ Manual scan failed: {str(e)}", exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
-
-        # Get config for event validation
-        config = get_config()
-
-        # Generate a unique ID for this webhook
-        webhook_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
 
         # Try to parse as Sonarr webhook first
         if "series" in payload:
             # Validate event type
             if event_type not in config.get("webhook_events", {}).get("sonarr", []):
-                logger.info(f"Ignoring unsupported Sonarr event={event_type}")
+                logger.info(f"  ├─ Ignoring unsupported Sonarr event={event_type}")
                 return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
             # Map "Download" to "Import" for consistency
@@ -1014,8 +1044,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 
             # Log webhook receipt
             path = payload.get("series", {}).get("path", "")
-            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            logger.info(f"Processing Sonarr webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+            logger.info(f"  ├─ Processing Sonarr webhook: \033[1m{event_type}\033[0m")
             logger.info(f"  └─ Series path: \033[1m{path}\033[0m")
 
             webhook_data = SonarrWebhook(**payload)
@@ -1026,10 +1055,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 if event_type.lower() in [e.lower() for e in inst.enabled_events]
             ]
             
-            logger.debug(f"Found {len(valid_instances)} Sonarr instances for event {event_type}")
+            logger.debug(f"  ├─ Found {len(valid_instances)} Sonarr instances for event {event_type}")
             
             if not valid_instances:
-                logger.info(f"No Sonarr instances configured for event={event_type}")
+                logger.info(f"  ├─ No Sonarr instances configured for event={event_type}")
                 
                 # Even if no instances are configured, we should still scan media servers for Import events
                 if event_type == "Import":
@@ -1041,12 +1070,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Initialize scanner with media servers from config
                     media_servers = config.get("media_servers", [])
-                    logger.debug(f"Found {len(media_servers)} media server(s) to scan")
-                    
-                    # Apply sync interval before media server scanning
-                    if sync_interval > 0:
-                        logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
-                        await asyncio.sleep(sync_interval)
+                    logger.debug(f"  ├─ Found {len(media_servers)} media server(s) to scan")
                     
                     scanner = MediaServerScanner(media_servers)
                     
@@ -1054,14 +1078,14 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     scan_path = None
                     if file_path:  # Use the full episode file path
                         scan_path = file_path
-                        logger.debug(f"Using episode file path for scanning: {scan_path}")
+                        logger.debug(f"  ├─ Using episode file path for scanning: {scan_path}")
                     elif series_path:  # Fallback to series path if file path not available
                         scan_path = series_path
-                        logger.debug(f"Using series path for scanning: {scan_path}")
+                        logger.debug(f"  ├─ Using series path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:
-                        logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
+                        logger.info(f"  ├─ Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=True)
                         
                         result = {
@@ -1076,31 +1100,26 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             else:
                 if event_type == "Grab":
-                    result = await handle_sonarr_grab(payload, valid_instances)
+                    result = await handle_sonarr_grab(payload, valid_instances, sync_interval, config)
                 elif event_type == "Import":
-                    result = await handle_sonarr_import(payload, valid_instances)
+                    result = await handle_sonarr_import(payload, valid_instances, sync_interval, config)
                 elif event_type in ["SeriesDelete", "EpisodeFileDelete"]:
-                    logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
-                    result = await handle_sonarr_delete(payload, valid_instances)
+                    logger.info(f"  ├─ Received {event_type} event, syncing deletion and scanning media servers")
+                    result = await handle_sonarr_delete(payload, valid_instances, sync_interval, config)
                 elif event_type == "SeriesAdd":
-                    logger.info(f"Received {event_type} event, syncing series addition across instances")
-                    result = await handle_sonarr_series_add(payload, valid_instances)
+                    logger.info(f"  ├─ Received {event_type} event, syncing series addition across instances")
+                    result = await handle_sonarr_series_add(payload, valid_instances, sync_interval, config)
                 else:
-                    logger.info(f"Unhandled Sonarr event type: {event_type}")
+                    logger.info(f"  ├─ Unhandled Sonarr event type: {event_type}")
                     result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
 
-            # Apply interval delay after processing
-            if sync_interval > 0:
-                logger.info(f"Applying interval delay of {sync_interval} seconds after processing")
-                await asyncio.sleep(sync_interval)
-            
             return result
 
         # Try to parse as Radarr webhook
         elif "movie" in payload:
             # Validate event type
             if event_type not in config.get("webhook_events", {}).get("radarr", []):
-                logger.info(f"Ignoring unsupported Radarr event={event_type}")
+                logger.info(f"  ├─ Ignoring unsupported Radarr event={event_type}")
                 return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
             # Map "Download" to "Import" for consistency
@@ -1113,8 +1132,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
             folder_path = movie_data.get("folderPath", "")
             file_path = movie_file.get("path", "")
             
-            logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            logger.info(f"Processing Radarr webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+            logger.info(f"  ├─ Processing Radarr webhook: \033[1m{event_type}\033[0m")
             logger.info(f"  ├─ Movie: \033[1m{movie_data.get('title', 'Unknown')}\033[0m")
             logger.info(f"  ├─ Folder path: {folder_path}")
             logger.info(f"  └─ File path: {file_path}")
@@ -1127,10 +1145,10 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                 if event_type.lower() in [e.lower() for e in inst.enabled_events]
             ]
             
-            logger.debug(f"Found {len(valid_instances)} Radarr instances for event {event_type}")
+            logger.debug(f"  ├─ Found {len(valid_instances)} Radarr instances for event {event_type}")
             
             if not valid_instances:
-                logger.info(f"No Radarr instances configured for event={event_type}")
+                logger.info(f"  ├─ No Radarr instances configured for event={event_type}")
                 
                 # Even if no instances are configured, we should still scan media servers for Import events
                 if event_type == "Import":
@@ -1142,12 +1160,7 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     
                     # Initialize scanner with media servers from config
                     media_servers = config.get("media_servers", [])
-                    logger.debug(f"Found {len(media_servers)} media server(s) to scan")
-                    
-                    # Apply sync interval before media server scanning
-                    if sync_interval > 0:
-                        logger.info(f"Waiting {sync_interval} seconds before scanning media servers")
-                        await asyncio.sleep(sync_interval)
+                    logger.debug(f"  ├─ Found {len(media_servers)} media server(s) to scan")
                     
                     scanner = MediaServerScanner(media_servers)
                     
@@ -1155,15 +1168,15 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     scan_path = None
                     if file_path:  # Use movie file path to get movie folder
                         scan_path = str(Path(file_path).parent)  # Get movie folder path
-                        logger.debug(f"Using movie file path for scanning: {file_path}")
-                        logger.debug(f"Using movie folder path for scanning: {scan_path}")
+                        logger.debug(f"  ├─ Using movie file path for scanning: {file_path}")
+                        logger.debug(f"  ├─ Using movie folder path for scanning: {scan_path}")
                     elif folder_path:  # Fallback to movie folder path if file path not available
                         scan_path = folder_path
-                        logger.debug(f"Using movie folder path for scanning: {scan_path}")
+                        logger.debug(f"  ├─ Using movie folder path for scanning: {scan_path}")
                     
                     scan_results = []
                     if scan_path:
-                        logger.info(f"Initiating scan for path: \033[1m{scan_path}\033[0m")
+                        logger.info(f"  ├─ Initiating scan for path: \033[1m{scan_path}\033[0m")
                         scan_results = await scanner.scan_path(scan_path, is_series=False)
                         
                         result = {
@@ -1178,45 +1191,34 @@ async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str
                     result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             else:
                 if event_type == "Grab":
-                    result = await handle_radarr_grab(payload, valid_instances)
+                    result = await handle_radarr_grab(payload, valid_instances, sync_interval, config)
                 elif event_type == "Import":
-                    result = await handle_radarr_import(payload, valid_instances)
+                    result = await handle_radarr_import(payload, valid_instances, sync_interval, config)
                 elif event_type in ["MovieDelete", "MovieFileDelete"]:
-                    logger.info(f"Received {event_type} event, syncing deletion and scanning media servers")
-                    result = await handle_radarr_delete(payload, valid_instances)
+                    logger.info(f"  ├─ Received {event_type} event, syncing deletion and scanning media servers")
+                    result = await handle_radarr_delete(payload, valid_instances, sync_interval, config)
                 elif event_type == "MovieAdded":
-                    logger.info(f"Received {event_type} event, syncing movie addition across instances")
-                    result = await handle_radarr_movie_add(payload, valid_instances)
+                    logger.info(f"  ├─ Received {event_type} event, syncing movie addition across instances")
+                    result = await handle_radarr_movie_add(payload, valid_instances, sync_interval, config)
                 else:
-                    logger.info(f"Unhandled Radarr event type: {event_type}")
+                    logger.info(f"  ├─ Unhandled Radarr event type: {event_type}")
                     result = {"status": "ignored", "reason": f"Unhandled event type: {event_type}"}
 
-            # Apply interval delay after processing
-            if sync_interval > 0:
-                logger.info(f"Applying interval delay of {sync_interval} seconds after processing")
-                await asyncio.sleep(sync_interval)
-            
             return result
 
         else:
-            logger.warning("Unknown webhook type")
+            logger.warning("  ├─ Unknown webhook type")
             raise ValueError("Webhook must contain either 'series' or 'movie' data")
 
     except ValueError as e:
-        logger.warning(f"Invalid webhook format: {str(e)}")
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "reason": f"Invalid webhook format: {str(e)}"},
-        )
+        logger.warning(f"  ├─ Invalid webhook format: {str(e)}")
+        return {"status": "error", "reason": f"Invalid webhook format: {str(e)}"}
 
     except Exception as e:
-        logger.error(f"Failed to process webhook: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "reason": f"Internal server error: {str(e)}"},
-        )
+        logger.error(f"  ├─ Failed to process webhook: {str(e)}")
+        return {"status": "error", "reason": f"Internal server error: {str(e)}"}
 
-async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance]):
+async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]):
     """Handle series rename by syncing across instances and scanning media servers"""
     series_data = payload.get("series", {})
     series_id = series_data.get("tvdbId")
@@ -1231,10 +1233,6 @@ async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrIn
         "renames": [],
         "scanResults": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the rename event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

@@ -125,7 +125,7 @@ def rescan_movie(base_url: str, api_key: str, movie_id: int) -> Dict[str, Any]:
 # ------------------------------------------------------------------------------
 # Handle Radarr "On Grab"
 # ------------------------------------------------------------------------------
-async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
+async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
     """Handle movie grab by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -140,10 +140,6 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
         "results": []
     }
     
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
-    
     # Log the grab event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info(f"Processing Radarr Grab: Title=\033[1m{title}\033[0m, TMDB=\033[1m{movie_id}\033[0m")
@@ -151,8 +147,13 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
         logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
     
     # Process each instance
-    for instance in instances:
+    for i, instance in enumerate(instances):
         try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
             # Check if movie exists
             existing_movie = await instance.get_movie_by_tmdb_id(movie_id)
             
@@ -210,7 +211,7 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
     return results
 
 
-async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
+async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
     """Handle movie import by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -225,10 +226,6 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
         "imports": [],
         "scanResults": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the import event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -325,7 +322,7 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
     return results
 
 
-async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[RadarrInstance]) -> Dict[str, Any]:
+async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
     """Handle movie addition by syncing across instances."""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -339,10 +336,6 @@ async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[Radar
         "tmdbId": movie_id,
         "adds": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the movie add event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -402,9 +395,9 @@ async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[Radar
             })
     
     # Log final results
-    successful_adds = len([r for r in results["adds"] if r["status"] == "success"])
-    skipped_adds = len([r for r in results["adds"] if r["status"] == "skipped"])
-    failed_adds = len([r for r in results["adds"] if r["status"] == "error"])
+    successful_adds = len([a for a in results["adds"] if a["status"] == "success"])
+    skipped_adds = len([a for a in results["adds"] if a["status"] == "skipped"])
+    failed_adds = len([a for a in results["adds"] if a["status"] == "error"])
     
     logger.info(f"  └─ Results:")
     if successful_adds > 0:
@@ -419,172 +412,7 @@ async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[Radar
     return results
 
 
-async def process_instances(self, event_type, movie_id=None, path=None, movie_file=None, movie_data=None):
-    """Process all Radarr instances for a given event type."""
-    results = []
-    
-    # Get instances that are enabled for this event type
-    instances = self.get_instances_for_event(event_type)
-    logger.debug(f"Found \033[1m{len(instances)}\033[0m Radarr instance(s) configured for '\033[1m{event_type}\033[0m' event")
-    
-    if not instances:
-        logger.warning(f"No Radarr instances configured for '\033[1m{event_type}\033[0m' event")
-        return results
-    
-    for instance in instances:
-        instance_name = instance.get("name", "Unknown")
-        instance_url = instance.get("url", "")
-        
-        try:
-            logger.info(f"Processing Radarr instance: \033[1m{instance_name}\033[0m (\033[1m{instance_url}\033[0m)")
-            
-            # Process based on event type
-            if event_type == "Test":
-                result = await self.test_instance(instance)
-                results.append(result)
-            elif event_type == "Rename":
-                if movie_id is not None:
-                    result = await self.process_rename(instance, movie_id)
-                    results.append(result)
-                else:
-                    logger.warning(f"Cannot process Rename event: missing movie_id")
-            elif event_type == "MovieDelete":
-                if movie_id is not None:
-                    result = await self.process_movie_delete(instance, movie_id)
-                    results.append(result)
-                else:
-                    logger.warning(f"Cannot process MovieDelete event: missing movie_id")
-            elif event_type == "MovieAdded":
-                if movie_data is not None:
-                    result = await self.process_movie_add(instance, movie_data)
-                    results.append(result)
-                else:
-                    logger.warning(f"Cannot process MovieAdded event: missing movie data")
-            elif event_type == "Download" or event_type == "Import":
-                if movie_data and movie_file:
-                    result = await self.process_download_import(instance, movie_data, movie_file, event_type)
-                    results.append(result)
-                else:
-                    logger.warning(f"Cannot process {event_type} event: missing movie data or file info")
-            else:
-                logger.warning(f"Unsupported event type: \033[1m{event_type}\033[0m")
-        except Exception as e:
-            logger.error(f"Error processing Radarr instance \033[1m{instance_name}\033[0m: \033[1m{str(e)}\033[0m")
-            results.append({
-                "instance": instance_name,
-                "status": "error",
-                "error": str(e)
-            })
-    
-    return results
-
-
-async def process_download_import(self, instance, movie_data, movie_file, event_type):
-    """Process a Download or Import event by checking if the movie exists and adding it if not."""
-    instance_name = instance.get("name", "Unknown")
-    instance_url = instance.get("url", "")
-    api_key = instance.get("api_key", "")
-    
-    # Extract movie details
-    movie_id = movie_data.get("id")
-    tmdb_id = movie_data.get("tmdbId")
-    imdb_id = movie_data.get("imdbId")
-    title = movie_data.get("title", "Unknown")
-    
-    logger.debug(f"Processing {event_type} for movie: {title} (TMDB: {tmdb_id}, IMDB: {imdb_id})")
-    
-    # Check if movie exists in this instance
-    movie_exists = await self.check_movie_exists(instance, tmdb_id)
-    
-    if movie_exists:
-        logger.debug(f"Movie '\033[1m{title}\033[0m' already exists in Radarr instance: \033[1m{instance_name}\033[0m")
-        return {
-            "instance": instance_name,
-            "status": "skipped",
-            "message": f"Movie already exists"
-        }
-    
-    # If movie doesn't exist, add it
-    try:
-        # Get quality profile from instance config or use default
-        quality_profile_id = instance.get("quality_profile_id")
-        if not quality_profile_id:
-            # Get profiles and use the first one
-            profiles = await self.get_quality_profiles(instance)
-            if profiles:
-                quality_profile_id = profiles[0].get("id")
-                logger.debug(f"Using default quality profile ID: \033[1m{quality_profile_id}\033[0m")
-            else:
-                raise Exception("No quality profiles available")
-        
-        # Get root folder from instance config or use default
-        root_folder = instance.get("root_folder")
-        if not root_folder:
-            # Get root folders and use the first one
-            folders = await self.get_root_folders(instance)
-            if folders:
-                root_folder = folders[0].get("path")
-                logger.debug(f"Using default root folder: {root_folder}")
-            else:
-                raise Exception("No root folders available")
-        
-        # Prepare movie data for adding
-        add_data = {
-            "title": title,
-            "qualityProfileId": quality_profile_id,
-            "rootFolderPath": root_folder,
-            "monitored": True,
-            "addOptions": {
-                "searchForMovie": False
-            }
-        }
-        
-        # Add TMDB or IMDB ID based on availability
-        if tmdb_id:
-            add_data["tmdbId"] = tmdb_id
-        elif imdb_id:
-            add_data["imdbId"] = imdb_id
-        else:
-            raise Exception("No TMDB or IMDB ID available for movie")
-        
-        # Add movie to Radarr
-        logger.info(f"Adding movie '{title}' to Radarr instance: {instance_name}")
-        
-        url = f"{instance_url}/api/v3/movie"
-        headers = {
-            "X-Api-Key": api_key,
-            "Content-Type": "application/json"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=add_data) as response:
-                if response.status == 201:
-                    result = await response.json()
-                    logger.info(f"Successfully added movie '{title}' to Radarr instance: {instance_name}")
-                    return {
-                        "instance": instance_name,
-                        "status": "success",
-                        "message": f"Movie added successfully",
-                        "movie_id": result.get("id")
-                    }
-                else:
-                    error_text = await response.text()
-                    logger.error(f"Failed to add movie to Radarr: {error_text}")
-                    return {
-                        "instance": instance_name,
-                        "status": "error",
-                        "error": f"Failed to add movie: {error_text}"
-                    }
-    except Exception as e:
-        logger.error(f"Error adding movie to Radarr instance \033[1m{instance_name}\033[0m: \033[1m{str(e)}\033[0m")
-        return {
-            "instance": instance_name,
-            "status": "error",
-            "error": str(e)
-        }
-
-
-async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance]):
+async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
     """Handle movie or movie file deletion by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -600,10 +428,6 @@ async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrIn
         "deletions": [],
         "scanResults": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the delete event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

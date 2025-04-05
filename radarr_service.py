@@ -125,7 +125,7 @@ def rescan_movie(base_url: str, api_key: str, movie_id: int) -> Dict[str, Any]:
 # ------------------------------------------------------------------------------
 # Handle Radarr "On Grab"
 # ------------------------------------------------------------------------------
-async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
+async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
     """Handle movie grab by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -211,7 +211,7 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
     return results
 
 
-async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
+async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
     """Handle movie import by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -322,7 +322,7 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
     return results
 
 
-async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
+async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
     """Handle movie addition by syncing across instances."""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
@@ -412,7 +412,7 @@ async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[Radar
     return results
 
 
-async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float) -> Dict[str, Any]:
+async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
     """Handle movie or movie file deletion by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")

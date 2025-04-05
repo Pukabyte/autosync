@@ -3,7 +3,7 @@ import time
 import asyncio
 import json
 from utils import http_get, http_post, http_put, get_config, parse_time_string, rewrite_path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from models import (
     SonarrSeries,
     SonarrEpisode,
@@ -30,12 +30,35 @@ def get_series_by_tvdbid(base_url, api_key, tvdb_id) -> List[Dict[str, Any]]:
     return http_get(url, api_key)
 
 
-def add_series(base_url: str, api_key: str, series: SonarrSeries) -> Dict[str, Any]:
-    """Add a new series to Sonarr using validated model."""
-    # Convert model to dict for API call
-    payload = series.model_dump(exclude_none=True)
-
+def add_series(
+    base_url: str,
+    api_key: str,
+    tvdb_id: int,
+    title: str,
+    year: int,
+    root_folder_path: str,
+    quality_profile_id: int,
+    language_profile_id: Optional[int] = None,
+    season_folder: bool = True
+) -> Dict[str, Any]:
+    """Add a new series to Sonarr."""
+    # Ensure URL has protocol
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"http://{base_url}"
+        logger.debug(f"Added http:// protocol to URL: {base_url}")
+        
     url = f"{base_url}/api/v3/series"
+    payload = {
+        "tvdbId": tvdb_id,
+        "title": title,
+        "year": year,
+        "qualityProfileId": quality_profile_id,
+        "languageProfileId": language_profile_id,
+        "seasonFolder": season_folder,
+        "rootFolderPath": root_folder_path,
+        "monitored": True,
+        "addOptions": {"searchForMissingEpisodes": False}
+    }
     return http_post(url, api_key, payload)
 
 
@@ -195,6 +218,8 @@ async def handle_sonarr_grab(payload: Dict[str, Any], instances: List[SonarrInst
                     instance.url,
                     instance.api_key,
                     series_id,
+                    title,
+                    series_data.get("year", 0),
                     instance.root_folder_path,
                     instance.quality_profile_id,
                     instance.language_profile_id,
@@ -593,3 +618,95 @@ async def handle_sonarr_webhook(payload: Dict[str, Any], instances: List[SonarrI
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
         return {"status": "error", "error": str(e)}
+
+
+async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle series rename by syncing across instances and scanning media servers"""
+    series_data = payload.get("series", {})
+    series_id = series_data.get("tvdbId")
+    title = series_data.get("title", "Unknown")
+    path = series_data.get("path")
+    
+    results = {
+        "status": "ok",
+        "event": "SeriesRename",
+        "title": title,
+        "tvdbId": series_id,
+        "renames": []
+    }
+    
+    # Log the rename event
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(f"Processing Sonarr SeriesRename: Title=\033[1m{title}\033[0m, TVDB=\033[1m{series_id}\033[0m")
+    if path:
+        logger.info(f"  ├─ Path: \033[1m{path}\033[0m")
+    
+    # Sync rename across instances
+    for i, instance in enumerate(instances):
+        try:
+            # Apply sync interval between instances (but not before the first one)
+            if i > 0 and sync_interval > 0:
+                logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
+                await asyncio.sleep(sync_interval)
+            
+            # Check if series exists
+            existing_series = await instance.get_series_by_tvdb_id(series_id)
+            
+            if existing_series:
+                logger.debug(f"  ├─ Series already exists (id={existing_series['id']}) on \033[1m{instance.name}\033[0m")
+                results["renames"].append({
+                    "instance": instance.name,
+                    "status": "skipped",
+                    "reason": "Series already exists"
+                })
+            else:
+                # Add series to instance
+                logger.info(f"  ├─ Adding series to \033[1m{instance.name}\033[0m")
+                new_series = add_series(
+                    instance.url,
+                    instance.api_key,
+                    series_id,
+                    title,
+                    series_data.get("year", 0),
+                    instance.root_folder_path,
+                    instance.quality_profile_id,
+                    instance.language_profile_id,
+                    instance.season_folder
+                )
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"  ├─ Search enabled for new series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
+                    search_series(instance.url, instance.api_key, new_series["id"])
+                    logger.info(f"  ├─ Triggered search for seriesId=\033[1m{new_series['id']}\033[0m on \033[1m{instance.name}\033[0m")
+                
+                results["renames"].append({
+                    "instance": instance.name,
+                    "status": "success",
+                    "seriesId": new_series["id"]
+                })
+                
+        except Exception as e:
+            logger.error(f"  ├─ Failed to rename to \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
+            results["renames"].append({
+                "instance": instance.name,
+                "status": "error",
+                "error": str(e)
+            })
+    
+    # Log final results
+    successful_renames = len([r for r in results["renames"] if r["status"] == "success"])
+    skipped_renames = len([r for r in results["renames"] if r["status"] == "skipped"])
+    failed_renames = len([r for r in results["renames"] if r["status"] == "error"])
+    
+    logger.info(f"  └─ Results:")
+    if successful_renames > 0:
+        logger.info(f"      ├─ Renamed to \033[1m{successful_renames}\033[0m instance(s)")
+    if skipped_renames > 0:
+        logger.info(f"      ├─ Skipped \033[1m{skipped_renames}\033[0m instance(s)")
+    if failed_renames > 0:
+        logger.info(f"      └─ Failed on \033[1m{failed_renames}\033[0m instance(s)")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return results

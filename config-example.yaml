@@ -21,6 +21,7 @@ webhook_events:
     - "Rename"
     - "MovieDelete"
     - "MovieFileDelete"
+    - "MovieAdded"
     - "Import"
 
 # Media server configurations for scanning

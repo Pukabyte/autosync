@@ -54,7 +54,7 @@ It also supports scanning media servers for new content upon import.
 
 3. Create a docker-compose.yml file:
    ```bash
-   cp docker-compose.example.yml docker-compose.yml
+   cp docker-compose-example.yml docker-compose.yml
    ```
 
 4. Edit the configuration file with your settings:

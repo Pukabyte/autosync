@@ -701,10 +701,13 @@ async def test_connection(
             if type.lower() == "plex":
                 test_url = f"{url}/library/sections"
                 headers = {"X-Plex-Token": token}
-            else:  # Jellyfin or Emby
+            elif type.lower() == "jellyfin":
+                test_url = f"{url}/System/Info/Public"
+                headers = {"X-MediaBrowser-Token": api_key}
+            elif type.lower() == "emby":
                 test_url = f"{url}/Library/SelectableMediaFolders"
                 headers = {"X-MediaBrowser-Token": api_key}
-            
+
             logger.debug(f"Attempting to connect to {test_url}")
             async with aiohttp.ClientSession() as session:
                 try:

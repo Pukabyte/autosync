@@ -170,6 +170,8 @@ async def handle_radarr_grab(payload: Dict[str, Any], instances: List[RadarrInst
                     instance.url,
                     instance.api_key,
                     movie_id,
+                    title,
+                    movie_data.get("year", 0),
                     instance.root_folder_path,
                     instance.quality_profile_id
                 )

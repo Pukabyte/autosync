@@ -47,12 +47,12 @@
                 
                 <div class="mb-3">
                     <label for="quality_profile_id" class="form-label">Quality Profile</label>
-                    <select class="form-select" id="quality_profile_id" name="quality_profile_id" required>
+                    <select class="form-select" id="quality_profile_id" name="quality_profile_id" required disabled>
                         <option value="">Select a quality profile...</option>
                     </select>
                     <div class="form-text">The quality profile to use for new content</div>
                 </div>
-                
+
                 {% if instance.type == "sonarr" %}
                 <div class="mb-3">
                     <div class="form-check">
@@ -208,17 +208,12 @@ let connectionTested = false;
 
 // Define loadInstanceData in global scope
 async function loadInstanceData() {
-    if (!connectionTested) return;
-    
     const urlInput = document.getElementById('url');
     const apiKeyInput = document.getElementById('api_key');
     const typeSelect = document.getElementById('type');
     const rootFolderSelect = document.getElementById('root_folder_path');
     const qualityProfileSelect = document.getElementById('quality_profile_id');
     const connectionStatus = document.getElementById('connectionStatus');
-    const apiKeyStatus = document.getElementById('apiKeyStatus');
-    const enabledEvents = document.getElementById('enabled_events');
-    const nameInput = document.getElementById('name');
     
     const url = urlInput.value;
     const apiKey = apiKeyInput.value;
@@ -235,6 +230,7 @@ async function loadInstanceData() {
                 const selected = folder.path === '{{ instance.root_folder_path }}' ? 'selected' : '';
                 rootFolderSelect.innerHTML += `<option value="${folder.path}" ${selected}>${folder.path}</option>`;
             });
+            rootFolderSelect.disabled = false;
         }
         
         // Load quality profiles
@@ -243,10 +239,12 @@ async function loadInstanceData() {
         
         if (profilesData.status === 'success') {
             qualityProfileSelect.innerHTML = '<option value="">Select a quality profile...</option>';
+            const currentQualityProfileId = parseInt('{{ instance.quality_profile_id }}');
             profilesData.profiles.forEach(profile => {
-                const selected = profile.id === parseInt('{{ instance.quality_profile_id }}') ? 'selected' : '';
+                const selected = profile.id === currentQualityProfileId ? 'selected' : '';
                 qualityProfileSelect.innerHTML += `<option value="${profile.id}" ${selected}>${profile.name}</option>`;
             });
+            qualityProfileSelect.disabled = false;
         }
     } catch (error) {
         connectionStatus.innerHTML = `<span class="text-danger">Failed to load instance data: ${error.message}</span>`;

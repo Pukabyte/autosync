@@ -230,12 +230,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const enabled = document.getElementById('enabled').checked;
         
         if (!url) {
-            alert('Please fill in the URL');
+            connectionStatus.innerHTML = '<span class="text-danger">Please enter a URL</span>';
             return;
         }
         
         if (!authKey) {
-            alert(`Please fill in the ${type === 'plex' ? 'Plex Token' : 'API Key'}`);
+            authKeyStatus.innerHTML = `<span class="text-danger">Please enter a ${type === 'plex' ? 'Plex Token' : 'API Key'}</span>`;
             return;
         }
         
@@ -283,13 +283,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.location.href = '/';
                 } else {
                     const errorData = await submitResponse.json();
-                    alert(errorData.message || 'Failed to add server');
+                    connectionStatus.innerHTML = `<span class="text-danger">${errorData.message || 'Failed to add server'}</span>`;
                 }
             } else {
-                alert(testResult.message);
+                connectionStatus.innerHTML = `<span class="text-danger">${testResult.message}</span>`;
             }
         } catch (error) {
-            alert(`Connection test failed: ${error.message}`);
+            connectionStatus.innerHTML = `<span class="text-danger">Connection test failed: ${error.message}</span>`;
         }
     });
 });

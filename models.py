@@ -321,16 +321,16 @@ class SonarrInstance(BaseModel):
     """Configuration model for Sonarr instances"""
 
     name: str
-    type: str
+    type: str = "sonarr"
     url: str
     api_key: str
     root_folder_path: str
-    season_folder: bool = True
-    quality_profile_id: int = 1
+    quality_profile_id: int
     language_profile_id: int = 1
+    season_folder: bool = True
     search_on_sync: bool = False
     enabled_events: List[str] = []
-    rewrite: Optional[List[PathRewrite]] = []
+    rewrite: Optional[List[Dict[str, str]]] = None
 
     @property
     def is_sonarr(self) -> bool:
@@ -425,14 +425,14 @@ class RadarrInstance(BaseModel):
     """Configuration model for Radarr instances"""
 
     name: str
-    type: str
+    type: str = "radarr"
     url: str
     api_key: str
     root_folder_path: str
-    quality_profile_id: int = 1
+    quality_profile_id: int
     search_on_sync: bool = False
     enabled_events: List[str] = []
-    rewrite: Optional[List[PathRewrite]] = []
+    rewrite: Optional[List[Dict[str, str]]] = None
 
     @property
     def is_radarr(self) -> bool:

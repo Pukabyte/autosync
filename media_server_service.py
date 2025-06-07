@@ -2,14 +2,149 @@ import logging
 import requests
 import asyncio
 import aiohttp
-from typing import List, Dict, Any, Optional
-from models import PlexServer, JellyfinServer, EmbyServer
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from models import PlexServer as PlexServerModel, JellyfinServer as JellyfinServerModel, EmbyServer as EmbyServerModel
 from urllib.parse import urljoin
 from pathlib import Path
 from utils import rewrite_path
+import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 # Create module logger
 logger = logging.getLogger(__name__)
+
+class MediaServerBase:
+    """Base class for media server implementations"""
+    def __init__(self, **kwargs):
+        self.name = kwargs.get('name', 'Unknown')
+        self.url = kwargs.get('url', '')
+        self.type = kwargs.get('type', 'unknown')
+        self.rewrite = kwargs.get('rewrite', [])
+        
+    async def _make_request(self, method: str, endpoint: str, **kwargs) -> str:
+        """Make a request to the media server API"""
+        url = urljoin(self.url, endpoint)
+        async with aiohttp.ClientSession() as session:
+            async with session.request(method, url, **kwargs) as response:
+                response.raise_for_status()
+                return await response.text()
+                
+    async def scan_path(self, path: str, **kwargs) -> Dict[str, Any]:
+        """Scan a path on the media server"""
+        raise NotImplementedError("Subclasses must implement scan_path")
+
+class PlexServer(MediaServerBase):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.token = kwargs.get('token', '')
+        self.type = "plex"
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value from the server configuration"""
+        return getattr(self, key, default)
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        """Return headers for API requests"""
+        return {
+            "X-Plex-Token": self.token,
+            "Accept": "application/xml"  # Force XML response
+        }
+
+    async def scan_path(self, path: str, plex_library_id: Optional[int] = None) -> Dict[str, Any]:
+        """Scan a specific path in Plex"""
+        # First get library sections
+        sections_text = await self._make_request("GET", "library/sections", headers=self.headers)
+        root = ET.fromstring(sections_text)
+                
+        # Find matching section for the path
+        section_id = None
+        
+        # If plex_library_id is provided, use it directly
+        if plex_library_id is not None:
+            for directory in root.findall(".//Directory"):
+                if int(directory.get("key", "0")) == plex_library_id:
+                    section_id = str(plex_library_id)
+                    logger.debug(f"Using specified Plex library ID: {section_id}")
+                    break
+            if not section_id:
+                raise ValueError(f"Specified Plex library ID {plex_library_id} not found")
+        else:
+            # Fall back to path-based matching
+            # First, apply any path rewrites
+            rewritten_path = rewrite_path(path, self.rewrite)
+            logger.debug(f"Original path: {path}")
+            logger.debug(f"Rewritten path: {rewritten_path}")
+            
+            # Find the exact matching section
+            for directory in root.findall(".//Directory"):
+                for location in directory.findall(".//Location"):
+                    location_path = location.get("path", "")
+                    # Normalize paths for comparison
+                    normalized_scan_path = Path(rewritten_path).resolve()
+                    normalized_location = Path(location_path).resolve()
+                    
+                    # Check if the scan path is within this location
+                    try:
+                        if normalized_scan_path.is_relative_to(normalized_location):
+                            section_id = directory.get("key")
+                            logger.debug(f"Found exact matching Plex library by path: {section_id}")
+                            logger.debug(f"  ├─ Scan path: {normalized_scan_path}")
+                            logger.debug(f"  └─ Library path: {normalized_location}")
+                            break
+                    except ValueError:
+                        # Path is not relative to location, continue checking
+                        continue
+                if section_id:
+                    break
+
+        if not section_id:
+            raise ValueError(f"No matching library section found for path: {path}")
+
+        # URL encode the path
+        encoded_path = quote(path)
+
+        # Trigger scan for the section with the specific path
+        await self._make_request("POST", f"library/sections/{section_id}/refresh?path={encoded_path}", headers=self.headers)
+        return {"status": "success", "message": "Scan initiated"}
+
+class JellyfinServer(MediaServerBase):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = kwargs.get('api_key', '')
+        self.type = "jellyfin"
+
+    async def scan_path(self, path: str) -> Dict[str, Any]:
+        """Scan a path in Jellyfin"""
+        headers = {
+            "X-MediaBrowser-Token": self.api_key
+        }
+        
+        # Trigger library scan
+        scan_url = urljoin(self.url, "/Library/Refresh")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(scan_url, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                return {"message": "Scan initiated"}
+
+class EmbyServer(MediaServerBase):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = kwargs.get('api_key', '')
+        self.type = "emby"
+
+    async def scan_path(self, path: str) -> Dict[str, Any]:
+        """Scan a path in Emby"""
+        headers = {
+            "X-Emby-Token": self.api_key
+        }
+        
+        # Trigger library scan
+        scan_url = urljoin(self.url, "/Library/Refresh")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(scan_url, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                return {"message": "Scan initiated"}
 
 class MediaServerScanner:
     def __init__(self, media_servers: List[Dict[str, Any]]):
@@ -44,7 +179,7 @@ class MediaServerScanner:
                 elif server_type == "emby":
                     self.media_servers.append(EmbyServer(**server_data))
 
-    async def scan_path(self, path: str, is_series: bool = False) -> List[Dict[str, Any]]:
+    async def scan_path(self, path: str, is_series: bool = False, plex_library_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Scan a path on all configured media servers."""
         results = []
         
@@ -57,7 +192,12 @@ class MediaServerScanner:
                 rewritten_path = rewrite_path(path, server.rewrite)
                 
                 try:
-                    result = await server.scan_path(rewritten_path)
+                    # Pass plex_library_id to Plex servers
+                    if isinstance(server, PlexServer):
+                        result = await server.scan_path(rewritten_path, plex_library_id=plex_library_id)
+                    else:
+                        result = await server.scan_path(rewritten_path)
+                        
                     results.append({
                         "server": server.name,
                         "type": server.type,
@@ -138,7 +278,6 @@ class MediaServerScanner:
                     raise ValueError(error_msg)
 
                 # Construct scan URL
-                from urllib.parse import quote
                 encoded_path = quote(path)
                 scan_url = f"{server.url}/library/sections/{section_id}/refresh?path={encoded_path}"
                 

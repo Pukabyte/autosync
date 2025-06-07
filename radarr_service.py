@@ -298,7 +298,12 @@ async def handle_radarr_import(payload: Dict[str, Any], instances: List[RadarrIn
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=False)
+        
+        # Get the instance that triggered the import
+        source_instance = next((inst for inst in instances if inst.url == payload.get("instanceUrl")), None)
+        plex_library_id = source_instance.plex_library_id if source_instance else None
+        
+        scan_results = await scanner.scan_path(path, is_series=False, plex_library_id=plex_library_id)
         results["scanResults"] = scan_results
         
         # Log scan results
@@ -415,7 +420,7 @@ async def handle_radarr_movie_add(payload: Dict[str, Any], instances: List[Radar
 
 
 async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle movie or movie file deletion by syncing across instances and scanning media servers"""
+    """Handle movie deletion by syncing across instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
     title = movie_data.get("title", "Unknown")
@@ -492,7 +497,12 @@ async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrIn
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=False)
+        
+        # Get the instance that triggered the delete
+        source_instance = next((inst for inst in instances if inst.url == payload.get("instanceUrl")), None)
+        plex_library_id = source_instance.plex_library_id if source_instance else None
+        
+        scan_results = await scanner.scan_path(path, is_series=False, plex_library_id=plex_library_id)
         results["scanResults"] = scan_results
         
         # Log scan results
@@ -518,8 +528,8 @@ async def handle_radarr_delete(payload: Dict[str, Any], instances: List[RadarrIn
     return results
 
 
-async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrInstance]):
-    """Handle movie rename by syncing across instances and scanning media servers"""
+async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle movie rename by refreshing instances and scanning media servers"""
     movie_data = payload.get("movie", {})
     movie_id = movie_data.get("tmdbId")
     title = movie_data.get("title", "Unknown")
@@ -533,10 +543,6 @@ async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrIn
         "renames": [],
         "scanResults": []
     }
-    
-    # Get sync interval from config
-    config = get_config()
-    sync_interval = parse_time_string(config.get("sync_interval", "0"))
     
     # Log the rename event
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -605,7 +611,12 @@ async def handle_radarr_rename(payload: Dict[str, Any], instances: List[RadarrIn
             await asyncio.sleep(sync_interval)
             
         scanner = MediaServerScanner(config.get("media_servers", []))
-        scan_results = await scanner.scan_path(path, is_series=False)
+        
+        # Get the instance that triggered the rename
+        source_instance = next((inst for inst in instances if inst.url == payload.get("instanceUrl")), None)
+        plex_library_id = source_instance.plex_library_id if source_instance else None
+        
+        scan_results = await scanner.scan_path(path, is_series=False, plex_library_id=plex_library_id)
         results["scanResults"] = scan_results
         
         # Log scan results

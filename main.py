@@ -14,7 +14,7 @@ from models import (
     RadarrWebhook,
     SonarrInstance,
     RadarrInstance,
-    PlexServer,
+    PlexServer as PlexServerModel,
     JellyfinServer,
     EmbyServer,
 )
@@ -33,16 +33,13 @@ import random
 import string
 from pathlib import Path
 import aiohttp
+import xml.etree.ElementTree as ET
 
 # Application version - update this when creating new releases
-VERSION = "0.0.39"
+VERSION = "0.0.44"
 
 # Create a logger for this module
 logger = logging.getLogger(__name__)
-# Remove this initial logging configuration
-# config = load_config()
-# log_level = config.get("log_level", "INFO")
-# logging.basicConfig(level=getattr(logging, log_level.upper()))
 
 # Store instances at module level with proper typing
 sonarr_instances: List[SonarrInstance] = []
@@ -1371,95 +1368,61 @@ async def get_root_folders(type: str, url: str, api_key: str) -> Dict[str, Any]:
             "message": f"Error: {str(e)}"
         }
 
-@app.get("/api/quality-profiles")
-async def get_quality_profiles(type: str, url: str, api_key: str) -> Dict[str, Any]:
-    """Get quality profiles from a Sonarr/Radarr instance."""
+async def get_sonarr_quality_profiles(url: str, api_key: str) -> List[Dict[str, Any]]:
+    """Get quality profiles from Sonarr instance."""
     try:
         # Ensure URL has protocol
         if not url.startswith(('http://', 'https://')):
             url = f"http://{url}"
             
-        # Test connection first
-        test_url = f"{url}/api/v3/system/status"
-        headers = {"X-Api-Key": api_key}
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
-                if response.status != 200:
-                    return {
-                        "status": "error",
-                        "message": "Failed to connect to instance"
-                    }
-        
         # Get quality profiles
         profiles_url = f"{url}/api/v3/qualityprofile"
+        headers = {"X-Api-Key": api_key}
+        
         async with aiohttp.ClientSession() as session:
             async with session.get(profiles_url, headers=headers, timeout=10, ssl=False) as response:
                 if response.status == 200:
                     profiles = await response.json()
-                    return {
-                        "status": "success",
-                        "profiles": profiles
-                    }
+                    return profiles
                 else:
                     error_text = await response.text()
-                    return {
-                        "status": "error",
-                        "message": f"Failed to get quality profiles: {error_text}"
-                    }
+                    raise ValueError(f"Failed to get quality profiles: {error_text}")
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Error: {str(e)}"
-        }
+        raise ValueError(f"Error getting quality profiles: {str(e)}")
 
-@app.get("/api/language-profiles")
-async def get_language_profiles(type: str, url: str, api_key: str) -> Dict[str, Any]:
-    """Get language profiles from a Sonarr instance."""
+async def get_radarr_quality_profiles(url: str, api_key: str) -> List[Dict[str, Any]]:
+    """Get quality profiles from Radarr instance."""
     try:
-        if type.lower() != "sonarr":
-            return {
-                "status": "error",
-                "message": "Language profiles are only available for Sonarr"
-            }
-            
         # Ensure URL has protocol
         if not url.startswith(('http://', 'https://')):
             url = f"http://{url}"
             
-        # Test connection first
-        test_url = f"{url}/api/v3/system/status"
+        # Get quality profiles
+        profiles_url = f"{url}/api/v3/qualityprofile"
         headers = {"X-Api-Key": api_key}
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(test_url, headers=headers, timeout=10, ssl=False) as response:
-                if response.status != 200:
-                    return {
-                        "status": "error",
-                        "message": "Failed to connect to instance"
-                    }
-        
-        # Get language profiles
-        profiles_url = f"{url}/api/v3/languageprofile"
         async with aiohttp.ClientSession() as session:
             async with session.get(profiles_url, headers=headers, timeout=10, ssl=False) as response:
                 if response.status == 200:
                     profiles = await response.json()
-                    return {
-                        "status": "success",
-                        "profiles": profiles
-                    }
+                    return profiles
                 else:
                     error_text = await response.text()
-                    return {
-                        "status": "error",
-                        "message": f"Failed to get language profiles: {error_text}"
-                    }
+                    raise ValueError(f"Failed to get quality profiles: {error_text}")
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Error: {str(e)}"
-        }
+        raise ValueError(f"Error getting quality profiles: {str(e)}")
+
+@app.get("/api/quality-profiles")
+async def get_quality_profiles(request: Request, type: str, url: str, api_key: str):
+    """Get list of quality profiles from Sonarr/Radarr."""
+    try:
+        if type.lower() == "sonarr":
+            profiles = await get_sonarr_quality_profiles(url, api_key)
+        else:
+            profiles = await get_radarr_quality_profiles(url, api_key)
+        return {"status": "success", "profiles": profiles}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # ------------------------------------------------------------------------------
 # Helper Functions

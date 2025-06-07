@@ -275,8 +275,7 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
         "event": "Import",
         "title": title,
         "tvdbId": series_id,
-        "imports": [],
-        "scanResults": []
+        "results": []
     }
     
     # Log the import event
@@ -285,7 +284,7 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
     if path:
         logger.info(f"  ├─ Series path: \033[1m{path}\033[0m")
     
-    # Sync import across instances
+    # Process each instance
     for i, instance in enumerate(instances):
         try:
             # Apply sync interval between instances (but not before the first one)
@@ -293,57 +292,70 @@ async def handle_sonarr_import(payload: Dict[str, Any], instances: List[SonarrIn
                 logger.info(f"  ├─ Waiting {sync_interval} seconds before processing next instance")
                 await asyncio.sleep(sync_interval)
             
-            # Apply path rewriting if configured
-            rewritten_path = rewrite_path(path, instance.rewrite)
+            # Check if series exists
+            existing_series = await instance.get_series_by_tvdb_id(series_id)
             
-            # Get the series from the instance
-            series = await instance.get_series_by_tvdb_id(series_id)
-            if series:
-                # Import series to instance
-                response = await instance.import_series(series_id, rewritten_path)
+            if existing_series:
+                logger.debug(f"  ├─ Series already exists (id={existing_series['id']}) on \033[1m{instance.name}\033[0m")
                 
                 # Trigger search if enabled
                 if instance.search_on_sync:
                     logger.info(f"  ├─ Search enabled for series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
-                    search_series(instance.url, instance.api_key, series_id)
-                    logger.info(f"  ├─ Triggered search for seriesId=\033[1m{series_id}\033[0m on \033[1m{instance.name}\033[0m")
+                    search_series(instance.url, instance.api_key, existing_series["id"])
+                    logger.info(f"  ├─ Triggered search for seriesId={existing_series['id']} on \033[1m{instance.name}\033[0m")
                 
-                results["imports"].append({
+                results["results"].append({
                     "instance": instance.name,
-                    "status": "success"
+                    "existingSeriesId": existing_series["id"]
                 })
             else:
-                logger.warning(f"  ├─ Series not found in \033[1m{instance.name}\033[0m")
-                results["imports"].append({
+                # Add series to instance
+                logger.info(f"  ├─ Adding series to \033[1m{instance.name}\033[0m")
+                new_series = add_series(
+                    instance.url,
+                    instance.api_key,
+                    series_id,
+                    title,
+                    series_data.get("year", 0),
+                    instance.root_folder_path,
+                    instance.quality_profile_id,
+                    instance.language_profile_id,
+                    instance.season_folder
+                )
+                
+                # Trigger search if enabled
+                if instance.search_on_sync:
+                    logger.info(f"  ├─ Search enabled for new series on \033[1m{instance.name}\033[0m (search_on_sync=True)")
+                    search_series(instance.url, instance.api_key, new_series["id"])
+                    logger.info(f"  ├─ Triggered search for seriesId={new_series['id']} on \033[1m{instance.name}\033[0m")
+                
+                results["results"].append({
                     "instance": instance.name,
-                    "status": "skipped",
-                    "reason": "Series not found"
+                    "newSeriesId": new_series["id"]
                 })
+                
         except Exception as e:
-            logger.error(f"  ├─ Failed to import to \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
-            results["imports"].append({
+            logger.error(f"  ├─ Failed to process on \033[1m{instance.name}\033[0m: \033[1m{str(e)}\033[0m")
+            results["results"].append({
                 "instance": instance.name,
                 "status": "error",
                 "error": str(e)
             })
-
+    
     # Log import results
-    successful_imports = len([i for i in results["imports"] if i["status"] == "success"])
-    skipped_imports = len([i for i in results["imports"] if i["status"] == "skipped"])
-    failed_imports = len([i for i in results["imports"] if i["status"] == "error"])
+    successful_imports = len([r for r in results["results"] if "newSeriesId" in r or "existingSeriesId" in r])
+    failed_imports = len([r for r in results["results"] if r.get("status") == "error"])
     
     logger.info(f"  ├─ Import results:")
     if successful_imports > 0:
         logger.info(f"  │   ├─ Imported to \033[1m{successful_imports}\033[0m instance(s)")
-    if skipped_imports > 0:
-        logger.info(f"  │   ├─ Skipped \033[1m{skipped_imports}\033[0m instance(s)")
     if failed_imports > 0:
         logger.info(f"  │   └─ Failed on \033[1m{failed_imports}\033[0m instance(s)")
 
     # Scan media servers if path exists
     if path:
         # Apply sync interval before media server scanning
-        if sync_interval > 0 and results["imports"]:
+        if sync_interval > 0 and results["results"]:
             logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
             await asyncio.sleep(sync_interval)
             
@@ -467,7 +479,7 @@ async def handle_sonarr_series_add(payload: Dict[str, Any], instances: List[Sona
 
 
 async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle series or episode deletion by syncing across instances and scanning media servers"""
+    """Handle series/episode deletion by syncing across instances and scanning media servers"""
     series_data = payload.get("series", {})
     series_id = series_data.get("tvdbId")
     title = series_data.get("title", "Unknown")
@@ -621,7 +633,7 @@ async def handle_sonarr_webhook(payload: Dict[str, Any], instances: List[SonarrI
 
 
 async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle series rename by syncing across instances and scanning media servers"""
+    """Handle series/episode rename by refreshing instances and scanning media servers"""
     series_data = payload.get("series", {})
     series_id = series_data.get("tvdbId")
     title = series_data.get("title", "Unknown")
@@ -706,6 +718,37 @@ async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrIn
         logger.info(f"      ├─ Skipped \033[1m{skipped_renames}\033[0m instance(s)")
     if failed_renames > 0:
         logger.info(f"      └─ Failed on \033[1m{failed_renames}\033[0m instance(s)")
+    
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    # Scan media servers if path exists
+    if path:
+        # Apply sync interval before media server scanning
+        if sync_interval > 0 and results["renames"]:
+            logger.info(f"  ├─ Waiting {sync_interval} seconds before scanning media servers")
+            await asyncio.sleep(sync_interval)
+            
+        scanner = MediaServerScanner(config.get("media_servers", []))
+        scan_results = await scanner.scan_path(path, is_series=True)
+        results["scanResults"] = scan_results
+        
+        # Log scan results
+        successful_scans = [s for s in scan_results if s.get("status") == "success"]
+        failed_scans = [s for s in scan_results if s.get("status") == "error"]
+        
+        logger.info(f"  └─ Scan results:")
+        if successful_scans:
+            for scan in successful_scans[:-1]:
+                logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+            if successful_scans:
+                logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+        if failed_scans:
+            for scan in failed_scans[:-1]:
+                logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+            if failed_scans:
+                logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+    else:
+        logger.info("  └─ No path provided for media server scanning")
     
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     

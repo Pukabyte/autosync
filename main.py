@@ -34,6 +34,9 @@ import string
 from pathlib import Path
 import aiohttp
 import xml.etree.ElementTree as ET
+from collections import defaultdict
+import time
+import uuid
 
 # Application version - update this when creating new releases
 VERSION = "0.0.44"
@@ -44,6 +47,11 @@ logger = logging.getLogger(__name__)
 # Store instances at module level with proper typing
 sonarr_instances: List[SonarrInstance] = []
 radarr_instances: List[RadarrInstance] = []
+
+# Add after other global variables
+webhook_batches = defaultdict(list)
+webhook_batch_timeout = 5  # seconds to wait for batched webhooks
+webhook_batch_lock = asyncio.Lock()
 
 # TODO: Add anime support
 
@@ -912,53 +920,135 @@ async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrIn
     return result
 
 @app.post("/webhook")
-async def webhook_handler(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
-    """
-    Handle webhooks from Sonarr and Radarr with proper validation.
-    """
+async def webhook_handler(request: Request):
+    """Handle incoming webhooks from Sonarr and Radarr."""
     try:
+        # Get webhook ID for tracking
+        webhook_id = str(uuid.uuid4())
+        logger.info(f"  ├─ Received webhook: \033[1m{webhook_id}\033[0m")
+        
+        # Parse webhook payload
+        try:
+            payload = await request.json()
+        except Exception as e:
+            logger.error(f"  ├─ Failed to parse webhook payload: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        
+        # Validate webhook payload
+        if not payload:
+            logger.error("  ├─ Empty webhook payload")
+            raise HTTPException(status_code=400, detail="Empty webhook payload")
+        
+        # Get event type
+        event_type = payload.get("eventType")
+        if not event_type:
+            logger.error("  ├─ Missing eventType in webhook payload")
+            raise HTTPException(status_code=400, detail="Missing eventType in webhook payload")
+        
+        logger.info(f"  ├─ Event type: \033[1m{event_type}\033[0m")
+        
         # Get sync timing settings
         config = get_config()
         sync_delay = parse_time_string(config.get("sync_delay", "0"))
         sync_interval = parse_time_string(config.get("sync_interval", "0"))
         
-        event_type = payload.get("eventType")
-        if not event_type:
-            raise ValueError("Webhook payload missing eventType")
-
-        # Generate a unique ID for this webhook
-        webhook_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
+        # Check if this is a Sonarr import webhook that should be batched
+        if "series" in payload and event_type == "Import":
+            series_data = payload.get("series", {})
+            series_id = series_data.get("tvdbId")
+            episode_file = payload.get("episodeFile", {})
+            season_number = episode_file.get("seasonNumber")
+            
+            if series_id and season_number:
+                # Add to batch
+                async with webhook_batch_lock:
+                    webhook_batches[(series_id, season_number)].append(payload)
+                
+                # Schedule batch processing with a delay
+                asyncio.create_task(asyncio.sleep(webhook_batch_timeout))
+                asyncio.create_task(process_batched_webhooks(series_id, season_number, webhook_id))
+                
+                # Return immediately to acknowledge receipt
+                return {"status": "ok", "message": "Webhook received and queued for batch processing"}
         
-        # Log webhook receipt and acknowledge it
-        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        logger.info(f"Received webhook: \033[1m{event_type}\033[0m (ID: {webhook_id})")
+        # For non-batched webhooks, process immediately
+        result = await process_webhook(payload, event_type, webhook_id, sync_delay, sync_interval)
         
-        # Return immediate acknowledgment
-        response = {
-            "status": "received",
-            "webhook_id": webhook_id,
-            "event_type": event_type,
-            "message": "Webhook received, processing will begin after sync delay"
-        }
+        # Log webhook completion
+        logger.info(f"  └─ Webhook processed: \033[1m{webhook_id}\033[0m")
         
-        # Start background task for processing
-        asyncio.create_task(process_webhook(payload, event_type, webhook_id, sync_delay, sync_interval))
+        return result
         
-        return response
-
-    except ValueError as e:
-        logger.warning(f"Invalid webhook format: {str(e)}")
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "reason": f"Invalid webhook format: {str(e)}"},
-        )
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to process webhook: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "reason": f"Internal server error: {str(e)}"},
-        )
+        logger.error(f"  ├─ Webhook handler error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def process_batched_webhooks(series_id: str, season_number: int, webhook_id: str):
+    """Process a batch of webhooks for the same series and season."""
+    async with webhook_batch_lock:
+        batch = webhook_batches.get((series_id, season_number), [])
+        if not batch:
+            return
+
+        # Get the most recent webhook payload
+        latest_webhook = batch[-1]
+        event_type = latest_webhook.get("eventType")
+        
+        # Get sync timing settings
+        config = get_config()
+        sync_delay = parse_time_string(config.get("sync_delay", "0"))
+        sync_interval = parse_time_string(config.get("sync_interval", "0"))
+        
+        # Process the webhook
+        if "series" in latest_webhook:
+            # Handle Sonarr webhook
+            if event_type == "Import":
+                # Get paths from payload for scanning
+                series_data = latest_webhook.get("series", {})
+                episode_file = latest_webhook.get("episodeFile", {})
+                series_path = series_data.get("path", "")
+                file_path = episode_file.get("path", "")
+                
+                # Initialize scanner with media servers from config
+                media_servers = config.get("media_servers", [])
+                logger.debug(f"  ├─ Found {len(media_servers)} media server(s) to scan")
+                
+                scanner = MediaServerScanner(media_servers)
+                
+                # Try to scan using the most specific path available
+                scan_path = None
+                if file_path:  # Use the full episode file path
+                    scan_path = str(Path(file_path).parent)  # Get season folder path
+                    logger.debug(f"  ├─ Using episode file path for scanning: {file_path}")
+                    logger.debug(f"  ├─ Using season folder path for scanning: {scan_path}")
+                elif series_path:  # Fallback to series path if file path not available
+                    scan_path = series_path
+                    logger.debug(f"  ├─ Using series path for scanning: {scan_path}")
+                
+                if scan_path:
+                    logger.info(f"  ├─ Initiating scan for path: \033[1m{scan_path}\033[0m")
+                    scan_results = await scanner.scan_path(scan_path, is_series=True)
+                    
+                    # Log scan results
+                    successful_scans = [s for s in scan_results if s.get("status") == "success"]
+                    failed_scans = [s for s in scan_results if s.get("status") == "error"]
+                    
+                    logger.info(f"  └─ Scan results:")
+                    if successful_scans:
+                        for scan in successful_scans[:-1]:
+                            logger.info(f"      ├─ Scanned \033[1m{scan['server']}\033[0m ({scan['type']})")
+                        if successful_scans:
+                            logger.info(f"      └─ Scanned \033[1m{successful_scans[-1]['server']}\033[0m ({successful_scans[-1]['type']})")
+                    if failed_scans:
+                        for scan in failed_scans[:-1]:
+                            logger.info(f"      ├─ Failed on \033[1m{scan['server']}\033[0m: {scan.get('message', 'Unknown error')}")
+                        if failed_scans:
+                            logger.info(f"      └─ Failed on \033[1m{failed_scans[-1]['server']}\033[0m: {failed_scans[-1].get('message', 'Unknown error')}")
+
+        # Clear the batch
+        del webhook_batches[(series_id, season_number)]
 
 async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: str, sync_delay: float, sync_interval: float):
     """Process webhook payload with proper timing."""
@@ -1077,8 +1167,9 @@ async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: 
                     # Try to scan using the most specific path available
                     scan_path = None
                     if file_path:  # Use the full episode file path
-                        scan_path = file_path
-                        logger.debug(f"  ├─ Using episode file path for scanning: {scan_path}")
+                        scan_path = str(Path(file_path).parent)  # Get season folder path
+                        logger.debug(f"  ├─ Using episode file path for scanning: {file_path}")
+                        logger.debug(f"  ├─ Using season folder path for scanning: {scan_path}")
                     elif series_path:  # Fallback to series path if file path not available
                         scan_path = series_path
                         logger.debug(f"  ├─ Using series path for scanning: {scan_path}")
@@ -1211,12 +1302,11 @@ async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: 
             raise ValueError("Webhook must contain either 'series' or 'movie' data")
 
     except ValueError as e:
-        logger.warning(f"  ├─ Invalid webhook format: {str(e)}")
-        return {"status": "error", "reason": f"Invalid webhook format: {str(e)}"}
-
+        logger.error(f"  ├─ Webhook validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"  ├─ Failed to process webhook: {str(e)}")
-        return {"status": "error", "reason": f"Internal server error: {str(e)}"}
+        logger.error(f"  ├─ Webhook processing error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def handle_sonarr_rename(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]):
     """Handle series rename by syncing across instances and scanning media servers"""

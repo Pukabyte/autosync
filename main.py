@@ -1278,6 +1278,9 @@ async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: 
                         }
                     else:
                         result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
+                elif event_type in ["MovieDelete", "MovieFileDelete"]:
+                    logger.info(f"  ├─ Received {event_type} event, syncing deletion and scanning media servers")
+                    result = await handle_radarr_delete(payload, valid_instances, sync_interval, config)
                 else:
                     result = {"status": "ignored", "reason": f"No instances configured for {event_type}"}
             else:

@@ -117,9 +117,9 @@ class JellyfinServer(MediaServerBase):
     async def scan_path(self, path: str) -> Dict[str, Any]:
         """Scan a path in Jellyfin"""
         headers = {
-            "X-MediaBrowser-Token": self.api_key
+            "Authorization": f'MediaBrowser Token="{self.api_key}"'
         }
-        
+
         # Trigger library scan
         scan_url = urljoin(self.url, "/Library/Refresh")
         async with aiohttp.ClientSession() as session:
@@ -305,9 +305,9 @@ class MediaServerScanner:
 
     async def _scan_jellyfin(self, server: JellyfinServer, path: str) -> Dict[str, Any]:
         headers = {
-            "X-MediaBrowser-Token": server.api_key
+            "Authorization": f'MediaBrowser Token="{server.api_key}"'
         }
-        
+
         # Trigger library scan
         scan_url = urljoin(server.url, "/Library/Refresh")
         async with aiohttp.ClientSession() as session:

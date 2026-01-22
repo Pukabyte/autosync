@@ -115,17 +115,34 @@ class JellyfinServer(MediaServerBase):
         self.type = "jellyfin"
 
     async def scan_path(self, path: str) -> Dict[str, Any]:
-        """Scan a path in Jellyfin"""
+        """Scan a specific path in Jellyfin using the Media/Updated endpoint.
+
+        This uses the /Library/Media/Updated endpoint which notifies Jellyfin
+        about changes to specific paths, rather than triggering a full library scan.
+        """
         headers = {
-            "X-MediaBrowser-Token": self.api_key
+            "Authorization": f'MediaBrowser Token="{self.api_key}"',
+            "Content-Type": "application/json"
         }
-        
-        # Trigger library scan
-        scan_url = urljoin(self.url, "/Library/Refresh")
+
+        # Use /Library/Media/Updated endpoint for path-specific scanning
+        scan_url = urljoin(self.url, "/Library/Media/Updated")
+
+        payload = {
+            "Updates": [
+                {
+                    "Path": path,
+                    "UpdateType": "Modified"
+                }
+            ]
+        }
+
+        logger.debug(f"Scanning Jellyfin path: {path}")
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(scan_url, headers=headers, timeout=30) as response:
+            async with session.post(scan_url, headers=headers, json=payload, timeout=30) as response:
                 response.raise_for_status()
-                return {"message": "Scan initiated"}
+                return {"status": "success", "message": f"Scan initiated for path: {path}"}
 
 class EmbyServer(MediaServerBase):
     def __init__(self, **kwargs):
@@ -305,15 +322,28 @@ class MediaServerScanner:
 
     async def _scan_jellyfin(self, server: JellyfinServer, path: str) -> Dict[str, Any]:
         headers = {
-            "X-MediaBrowser-Token": server.api_key
+            "Authorization": f'MediaBrowser Token="{server.api_key}"',
+            "Content-Type": "application/json"
         }
-        
-        # Trigger library scan
-        scan_url = urljoin(server.url, "/Library/Refresh")
+
+        # Use /Library/Media/Updated endpoint for path-specific scanning
+        scan_url = urljoin(server.url, "/Library/Media/Updated")
+
+        payload = {
+            "Updates": [
+                {
+                    "Path": path,
+                    "UpdateType": "Modified"
+                }
+            ]
+        }
+
+        logger.debug(f"Scanning Jellyfin path: {path}")
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(scan_url, headers=headers, timeout=30) as response:
+            async with session.post(scan_url, headers=headers, json=payload, timeout=30) as response:
                 response.raise_for_status()
-                return {"message": "Scan initiated"}
+                return {"status": "success", "message": f"Scan initiated for path: {path}"}
 
     async def _scan_emby(self, server: EmbyServer, path: str) -> Dict[str, Any]:
         headers = {

@@ -708,7 +708,7 @@ async def test_connection(
                 headers = {"X-Plex-Token": token}
             elif type.lower() == "jellyfin":
                 test_url = f"{url}/System/Info/Public"
-                headers = {"X-MediaBrowser-Token": api_key}
+                headers = {"Authorization": f'MediaBrowser Token="{api_key}"'}
             elif type.lower() == "emby":
                 test_url = f"{url}/Library/SelectableMediaFolders"
                 headers = {"X-MediaBrowser-Token": api_key}

@@ -61,6 +61,7 @@ instances:
     search_on_sync: false
     enabled_events:
       - "Import"
+    excluded_quality_profile_ids: []  # e.g. [7] to skip profile ID 7 from syncing to this instance
 
   - name: "sonarrmux"
     type: "sonarr"
@@ -73,6 +74,7 @@ instances:
     search_on_sync: false
     enabled_events:
       - "Import"
+    excluded_quality_profile_ids: []
 
   - name: "radarr4k"
     type: "radarr"
@@ -83,6 +85,7 @@ instances:
     search_on_sync: false
     enabled_events:
       - "Import"
+    excluded_quality_profile_ids: []  # e.g. [7] to skip profile ID 7 from syncing to this instance
 
   - name: "radarrmux"
     type: "radarr"
@@ -93,6 +96,7 @@ instances:
     search_on_sync: false
     enabled_events:
       - "Import"
+    excluded_quality_profile_ids: []
     # Optional: Rewrite rules for instance
     #rewrite:
     #  - from_path: "/mnt/plex/Movies - Remux"

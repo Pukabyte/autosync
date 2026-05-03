@@ -53,6 +53,12 @@
                     <div class="form-text">The quality profile to use for new content</div>
                 </div>
 
+                <div class="mb-3" id="excludedProfilesContainer">
+                    <label class="form-label">Don't Sync These Profiles</label>
+                    <div id="excludedProfilesList" class="form-control p-2" style="max-height:160px;overflow-y:auto;"></div>
+                    <div class="form-text">Series imported with these quality profiles will stay on this instance only</div>
+                </div>
+
                 {% if instance.type == "sonarr" %}
                 <div class="mb-3">
                     <div class="form-check">
@@ -245,6 +251,20 @@ async function loadInstanceData() {
                 qualityProfileSelect.innerHTML += `<option value="${profile.id}" ${selected}>${profile.name}</option>`;
             });
             qualityProfileSelect.disabled = false;
+
+            const currentExcluded = {{ instance.excluded_quality_profile_ids | default([]) | tojson }};
+            const excludedList = document.getElementById('excludedProfilesList');
+            excludedList.innerHTML = '';
+            profilesData.profiles.forEach(profile => {
+                const checked = currentExcluded.includes(profile.id) ? 'checked' : '';
+                excludedList.innerHTML += `
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox"
+                            name="excluded_quality_profile_ids" value="${profile.id}"
+                            id="excl_${profile.id}" ${checked}>
+                        <label class="form-check-label" for="excl_${profile.id}">${profile.name}</label>
+                    </div>`;
+            });
         }
     } catch (error) {
         connectionStatus.innerHTML = `<span class="text-danger">Failed to load instance data: ${error.message}</span>`;
@@ -425,6 +445,11 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('enabled_events', event);
         });
         
+        // Add excluded quality profile IDs
+        document.querySelectorAll('input[name="excluded_quality_profile_ids"]:checked').forEach(input => {
+            formData.append('excluded_quality_profile_ids', input.value);
+        });
+
         // Add rewrite rules
         const rewriteRules = document.querySelectorAll('.rewrite-rule');
         rewriteRules.forEach((rule, index) => {
@@ -435,7 +460,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 formData.append(`rewrite_to`, toPath);
             }
         });
-        
+
         try {
             // First test the connection
             const testResponse = await fetch('/test-connection', {

@@ -236,7 +236,8 @@ async def add_instance(
     language_profile_id: Optional[int] = Form(None),
     season_folder: Optional[bool] = Form(False),
     search_on_sync: Optional[bool] = Form(False),
-    enabled_events: List[str] = Form([])
+    enabled_events: List[str] = Form([]),
+    excluded_quality_profile_ids: List[int] = Form([])
 ):
     """Add a new instance to the configuration."""
     global sonarr_instances, radarr_instances
@@ -251,14 +252,15 @@ async def add_instance(
         "root_folder_path": root_folder_path,
         "quality_profile_id": quality_profile_id,
         "search_on_sync": search_on_sync,
-        "enabled_events": enabled_events
+        "enabled_events": enabled_events,
+        "excluded_quality_profile_ids": excluded_quality_profile_ids
     }
-    
+
     # Add Sonarr-specific fields
     if type.lower() == "sonarr":
         instance_data["language_profile_id"] = language_profile_id or 1
         instance_data["season_folder"] = season_folder
-    
+
     # Check if instance with same name and type already exists
     for idx, inst in enumerate(config.get("instances", [])):
         if inst.get("name") == name and inst.get("type") == type:
@@ -451,6 +453,7 @@ async def edit_instance(
     season_folder: Optional[bool] = Form(False),
     search_on_sync: Optional[bool] = Form(False),
     enabled_events: List[str] = Form([]),
+    excluded_quality_profile_ids: List[int] = Form([]),
     rewrite_from: Optional[List[str]] = Form([]),
     rewrite_to: Optional[List[str]] = Form([])
 ):
@@ -467,14 +470,15 @@ async def edit_instance(
         "root_folder_path": root_folder_path,
         "quality_profile_id": quality_profile_id,
         "search_on_sync": search_on_sync,
-        "enabled_events": enabled_events
+        "enabled_events": enabled_events,
+        "excluded_quality_profile_ids": excluded_quality_profile_ids
     }
-    
+
     # Add Sonarr-specific fields
     if type.lower() == "sonarr":
         instance_data["language_profile_id"] = language_profile_id or 1
         instance_data["season_folder"] = season_folder
-    
+
     # Add rewrite rules if any
     if rewrite_from and rewrite_to:
         instance_data["rewrite"] = [
@@ -771,6 +775,20 @@ async def debug_webhook(payload: Dict[str, Any], request: Request) -> Dict[str, 
         "eventType": payload.get("eventType", "unknown"),
         "payload": payload,
     }
+
+async def get_source_quality_profile_id(instance, media_id: int, media_type: str) -> Optional[int]:
+    """Look up the quality profile ID for a series or movie in its source instance."""
+    endpoint = "series" if media_type == "sonarr" else "movie"
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{instance.base_url}/api/v3/{endpoint}/{media_id}"
+            async with session.get(url, headers=instance.headers, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as resp:
+                if resp.status == 200:
+                    return (await resp.json()).get("qualityProfileId")
+    except Exception as e:
+        logger.debug(f"  ├─ Could not fetch quality profile for {media_type} id={media_id}: {e}")
+    return None
+
 
 async def handle_sonarr_delete(payload: Dict[str, Any], instances: List[SonarrInstance], sync_interval: float, config: Dict[str, Any]):
     """Handle series or episode deletion by syncing across instances and scanning media servers"""
@@ -1141,10 +1159,22 @@ async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: 
             
             # Filter instances that have this event type enabled
             valid_instances = [
-                inst for inst in sonarr_instances 
+                inst for inst in sonarr_instances
                 if event_type.lower() in [e.lower() for e in inst.enabled_events]
             ]
-            
+
+            # Filter by source quality profile exclusions
+            source = next((i for i in sonarr_instances if i.name.lower() == (payload.get("instanceName") or "").lower()), None)
+            if valid_instances and source and source.excluded_quality_profile_ids:
+                series_id = payload.get("series", {}).get("id")
+                series_title = payload.get("series", {}).get("title", "Unknown")
+                if series_id:
+                    source_profile_id = await get_source_quality_profile_id(source, series_id, "sonarr")
+                    if source_profile_id and source_profile_id in source.excluded_quality_profile_ids:
+                        target_names = ", ".join(i.name for i in valid_instances)
+                        logger.info(f"  ├─ Sync excluded: \033[1m{series_title}\033[0m (profile {source_profile_id}) — would have synced to: \033[1m{target_names}\033[0m")
+                        valid_instances = []
+
             logger.debug(f"  ├─ Found {len(valid_instances)} Sonarr instances for event {event_type}")
             
             if not valid_instances:
@@ -1232,10 +1262,22 @@ async def process_webhook(payload: Dict[str, Any], event_type: str, webhook_id: 
             
             # Filter instances that have this event type enabled
             valid_instances = [
-                inst for inst in radarr_instances 
+                inst for inst in radarr_instances
                 if event_type.lower() in [e.lower() for e in inst.enabled_events]
             ]
-            
+
+            # Filter by source quality profile exclusions
+            source = next((i for i in radarr_instances if i.name.lower() == (payload.get("instanceName") or "").lower()), None)
+            if valid_instances and source and source.excluded_quality_profile_ids:
+                movie_id = payload.get("movie", {}).get("id")
+                movie_title = payload.get("movie", {}).get("title", "Unknown")
+                if movie_id:
+                    source_profile_id = await get_source_quality_profile_id(source, movie_id, "radarr")
+                    if source_profile_id and source_profile_id in source.excluded_quality_profile_ids:
+                        target_names = ", ".join(i.name for i in valid_instances)
+                        logger.info(f"  ├─ Sync excluded: \033[1m{movie_title}\033[0m (profile {source_profile_id}) — would have synced to: \033[1m{target_names}\033[0m")
+                        valid_instances = []
+
             logger.debug(f"  ├─ Found {len(valid_instances)} Radarr instances for event {event_type}")
             
             if not valid_instances:

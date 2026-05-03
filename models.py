@@ -330,6 +330,7 @@ class SonarrInstance(BaseModel):
     season_folder: bool = True
     search_on_sync: bool = False
     enabled_events: List[str] = []
+    excluded_quality_profile_ids: List[int] = []
     rewrite: Optional[List[Dict[str, str]]] = None
 
     @property
@@ -432,6 +433,7 @@ class RadarrInstance(BaseModel):
     quality_profile_id: int
     search_on_sync: bool = False
     enabled_events: List[str] = []
+    excluded_quality_profile_ids: List[int] = []
     rewrite: Optional[List[Dict[str, str]]] = None
 
     @property

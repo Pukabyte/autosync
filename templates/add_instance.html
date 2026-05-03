@@ -56,6 +56,12 @@
                     <div class="form-text">The quality profile to use for new content</div>
                 </div>
 
+                <div class="mb-3" id="excludedProfilesContainer" style="display:none;">
+                    <label class="form-label">Don't Sync These Profiles</label>
+                    <div id="excludedProfilesList" class="form-control p-2" style="max-height:160px;overflow-y:auto;"></div>
+                    <div class="form-text">Series imported with these quality profiles will stay on this instance only</div>
+                </div>
+
                 <div class="mb-3" id="seasonFolderSection">
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="season_folder" name="season_folder">
@@ -235,6 +241,20 @@ async function loadInstanceData() {
                 qualityProfileSelect.innerHTML += `<option value="${profile.id}">${profile.name}</option>`;
             });
             qualityProfileSelect.disabled = false;
+
+            const excludedContainer = document.getElementById('excludedProfilesContainer');
+            const excludedList = document.getElementById('excludedProfilesList');
+            excludedList.innerHTML = '';
+            profilesData.profiles.forEach(profile => {
+                excludedList.innerHTML += `
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox"
+                            name="excluded_quality_profile_ids" value="${profile.id}"
+                            id="excl_${profile.id}">
+                        <label class="form-check-label" for="excl_${profile.id}">${profile.name}</label>
+                    </div>`;
+            });
+            excludedContainer.style.display = '';
         }
     } catch (error) {
         connectionStatus.innerHTML = `<span class="text-danger">Failed to load instance data: ${error.message}</span>`;
@@ -374,6 +394,8 @@ document.addEventListener('DOMContentLoaded', function() {
         qualityProfileSelect.disabled = true;
         rootFolderSelect.innerHTML = '<option value="">Select a root folder...</option>';
         qualityProfileSelect.innerHTML = '<option value="">Select a quality profile...</option>';
+        document.getElementById('excludedProfilesList').innerHTML = '';
+        document.getElementById('excludedProfilesContainer').style.display = 'none';
         connectionStatus.innerHTML = '';
         apiKeyStatus.innerHTML = '';
         apiKeyInput.type = 'text';
@@ -452,6 +474,11 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('enabled_events', event);
         });
         
+        // Add excluded quality profile IDs
+        document.querySelectorAll('input[name="excluded_quality_profile_ids"]:checked').forEach(input => {
+            formData.append('excluded_quality_profile_ids', input.value);
+        });
+
         // Add rewrite rules
         const rewriteRules = document.querySelectorAll('.rewrite-rule');
         rewriteRules.forEach((rule, index) => {
@@ -462,7 +489,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 formData.append(`rewrite_to`, toPath);
             }
         });
-        
+
         try {
             const response = await fetch('/test-connection', {
                 method: 'POST',
